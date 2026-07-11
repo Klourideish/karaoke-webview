@@ -10,6 +10,28 @@
 
 ---
 
+> **Authority**
+>
+> Accepted RFCs are authoritative.
+>
+> Implementations must conform to Accepted RFCs.
+>
+> If implementation conflicts with this RFC,
+> stop and request a Design Review.
+
+---
+
+> **Core Dependencies**
+>
+> This RFC extends:
+>
+> - RFC-...
+> - RFC-...
+>
+> It does not redefine those documents.
+
+---
+
 # Summary
 
 A concise overview (2–5 sentences).

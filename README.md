@@ -53,7 +53,7 @@ The app owns one persistent audio element at the shell level. The bottom transpo
 
 ## Local Microphone Discovery
 
-The Microphones workspace can discover local Windows audio input endpoints and identify the current Windows default input. Discovery reads endpoint metadata only: it does not open devices, capture audio, create microphone channels, or assign sources to singers. Device endpoint identifiers remain inside the Rust Windows adapter; the frontend receives stable opaque source IDs.
+The Microphones workspace discovers local Windows audio input endpoints, refreshes the host snapshot automatically, and identifies the current Windows default input. A manual Refresh action is also available. Discovery reads endpoint metadata only: it does not open devices, capture audio, create microphone channels, or assign sources to singers. Device endpoint identifiers remain inside the Rust Windows adapter; the frontend receives stable opaque source IDs.
 
 ## Lyrics Parsing
 
