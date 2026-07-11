@@ -9,6 +9,26 @@ pub(crate) fn resolve_audio_source_for_song(
     settings_path: &Path,
     song: MediaSong,
 ) -> Result<ResolvedAudioSource, PlaybackSourceError> {
+    let (song, _root_path, audio_path, _lyric_path) = validate_song_paths(settings_path, song)?;
+
+    Ok(ResolvedAudioSource {
+        song_id: song.id,
+        audio_path: path_to_string(&audio_path),
+    })
+}
+
+pub(crate) fn resolve_lyric_source_for_song(
+    settings_path: &Path,
+    song: MediaSong,
+) -> Result<PathBuf, PlaybackSourceError> {
+    let (_song, _root_path, _audio_path, lyric_path) = validate_song_paths(settings_path, song)?;
+    Ok(lyric_path)
+}
+
+fn validate_song_paths(
+    settings_path: &Path,
+    song: MediaSong,
+) -> Result<(MediaSong, PathBuf, PathBuf, PathBuf), PlaybackSourceError> {
     let settings = read_library_settings(settings_path).map_err(PlaybackSourceError::settings)?;
     let root_path = settings
         .library_root
@@ -47,10 +67,7 @@ pub(crate) fn resolve_audio_source_for_song(
         ));
     }
 
-    Ok(ResolvedAudioSource {
-        song_id: song.id,
-        audio_path: path_to_string(&audio_path),
-    })
+    Ok((song, root_path, audio_path, lyric_path))
 }
 
 fn validate_media_path(

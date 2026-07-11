@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import type { LyricDocument } from "./lyrics";
 import type { LibraryScanResult, MediaSong } from "./media-library/types";
 
 const tauriMocks = vi.hoisted(() => ({
@@ -117,10 +118,58 @@ const unpairedCandidatesScanResult: LibraryScanResult = {
   lyricFileCount: 0,
 };
 
+const populatedLyricDocument: LyricDocument = {
+  schemaVersion: 1,
+  sourceSongId: "song-a",
+  language: "en",
+  warnings: [],
+  lines: [
+    {
+      id: "line-a",
+      beginMs: 1_000,
+      endMs: 2_000,
+      text: "Yesterday all my troubles",
+      segments: [
+        {
+          id: "segment-a",
+          beginMs: 1_000,
+          endMs: 2_000,
+          text: "Yesterday all my troubles",
+          timingGranularity: "text",
+          styleRefs: [],
+        },
+      ],
+      role: null,
+      region: null,
+      styleRefs: [],
+    },
+    {
+      id: "line-b",
+      beginMs: 4_000,
+      endMs: 5_000,
+      text: "Seemed so far away",
+      segments: [
+        {
+          id: "segment-b",
+          beginMs: 4_000,
+          endMs: 5_000,
+          text: "Seemed so far away",
+          timingGranularity: "text",
+          styleRefs: [],
+        },
+      ],
+      role: null,
+      region: null,
+      styleRefs: [],
+    },
+  ],
+};
+
 function mockInvokeWith({
   cacheResult = { status: "miss", scanResult: null, message: null },
   loadRoot = null,
   scanResult = emptyScanResult,
+  lyricResult = populatedLyricDocument,
 }: {
   cacheResult?: {
     status: "hit" | "miss" | "corrupt" | "root-mismatch" | "unsupported-schema";
@@ -129,6 +178,7 @@ function mockInvokeWith({
   };
   loadRoot?: string | null;
   scanResult?: LibraryScanResult;
+  lyricResult?: LyricDocument;
 } = {}) {
   tauriMocks.invoke.mockImplementation((command: string, args?: { song?: MediaSong }) => {
     if (command === "load_library_settings") {
@@ -159,12 +209,48 @@ function mockInvokeWith({
       });
     }
 
+    if (command === "parse_song_lyrics") {
+      const firstSong = args?.song ?? scanResult.songs[0] ?? populatedScanResult.songs[0];
+      return Promise.resolve({
+        ...lyricResult,
+        sourceSongId: firstSong.id,
+      });
+    }
+
     if (command === "scan_media_library") {
       return Promise.resolve(scanResult);
     }
 
     return Promise.reject(new Error(`Unexpected command: ${command}`));
   });
+}
+
+function mockSuccessfulLibraryInvoke(command: string) {
+  if (command === "load_library_settings") {
+    return Promise.resolve({ libraryRoot: "C:\\Music" });
+  }
+
+  if (command === "load_library_index") {
+    return Promise.resolve({ status: "miss", scanResult: null, message: null });
+  }
+
+  if (command === "scan_media_library") {
+    return Promise.resolve(populatedScanResult);
+  }
+
+  if (command === "save_library_index") {
+    return Promise.resolve();
+  }
+
+  if (command === "save_library_root") {
+    return Promise.resolve({ libraryRoot: "C:\\Music" });
+  }
+
+  if (command === "clear_library_index") {
+    return Promise.resolve();
+  }
+
+  return Promise.reject(new Error(`Unexpected command: ${command}`));
 }
 
 beforeEach(() => {
@@ -636,6 +722,7 @@ describe("Library workspace", () => {
     );
     expect(getAudioElement().src).toContain("The%20Beatles%20-%20Hey%20Jude.opus");
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "Queue" })).toHaveTextContent(
       "No songs queued yet.",
     );
@@ -657,6 +744,22 @@ describe("Library workspace", () => {
     expect(getAudioElement()).toBe(audio);
   });
 
+  it("preserves the playing transport label while switching workspaces", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+    await playSongFromLibrary(user, "Hey Jude");
+
+    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+  });
+
   it("reflects media events for duration, time, seek, volume, pause, and ended", async () => {
     const user = userEvent.setup();
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
@@ -666,6 +769,7 @@ describe("Library workspace", () => {
     await playSongFromLibrary(user, "Hey Jude");
 
     const audio = getAudioElement();
+    const transport = screen.getByRole("contentinfo", { name: "Media transport" });
     setAudioNumberProperty(audio, "duration", 125);
     setAudioNumberProperty(audio, "currentTime", 30);
     fireEvent.loadedMetadata(audio);
@@ -674,12 +778,15 @@ describe("Library workspace", () => {
     expect(screen.getByText("0:30")).toBeInTheDocument();
     expect(screen.getByText("2:05")).toBeInTheDocument();
 
-    fireEvent.play(audio);
     await user.click(screen.getByRole("button", { name: "Pause" }));
     expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
 
     fireEvent.pause(audio);
     expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(within(transport).getByRole("button", { name: "Play" })).toBeInTheDocument();
+
+    fireEvent.play(audio);
+    expect(within(transport).getByRole("button", { name: "Pause" })).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("slider", { name: "Seek" }), { target: { value: "45" } });
     expect(audio.currentTime).toBe(45);
@@ -690,6 +797,7 @@ describe("Library workspace", () => {
     setAudioNumberProperty(audio, "currentTime", 125);
     fireEvent.ended(audio);
     expect(screen.getByText("Ended")).toBeInTheDocument();
+    expect(within(transport).getByRole("button", { name: "Play" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "Queue" })).toHaveTextContent(
       "No songs queued yet.",
     );
@@ -733,6 +841,202 @@ describe("Library workspace", () => {
     expect(screen.getByRole("region", { name: "Current song information" })).toHaveTextContent(
       "Björk - Jóga",
     );
+  });
+
+  it("parses lyrics for a loaded song and updates the Perform view from the audio clock", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+
+    await playSongFromLibrary(user, "Hey Jude");
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("parse_song_lyrics", {
+        song: populatedScanResult.songs[0],
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Perform" }));
+    const audio = getAudioElement();
+    setAudioNumberProperty(audio, "currentTime", 1.2);
+    fireEvent.timeUpdate(audio);
+
+    expect(await screen.findByText("Yesterday all my troubles")).toBeInTheDocument();
+    expect(screen.getByText("Seemed so far away")).toBeInTheDocument();
+  });
+
+  it("keeps brief lyric gaps stable and responds to rapid seeks", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+    await playSongFromLibrary(user, "Hey Jude");
+    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await screen.findByText("Yesterday all my troubles");
+
+    const audio = getAudioElement();
+    setAudioNumberProperty(audio, "currentTime", 3);
+    fireEvent.timeUpdate(audio);
+    expect(screen.queryByLabelText("Instrumental section")).not.toBeInTheDocument();
+    expect(screen.getByText("Yesterday all my troubles")).toBeInTheDocument();
+    expect(screen.getByText("Seemed so far away")).toBeInTheDocument();
+
+    setAudioNumberProperty(audio, "currentTime", 4.2);
+    fireEvent.timeUpdate(audio);
+    expect(screen.getByText("Seemed so far away")).toBeInTheDocument();
+    expect(screen.queryByText("Yesterday all my troubles")).not.toBeInTheDocument();
+
+    setAudioNumberProperty(audio, "currentTime", 1.1);
+    fireEvent.timeUpdate(audio);
+    expect(screen.getByText("Yesterday all my troubles")).toBeInTheDocument();
+  });
+
+  it("shows Instrumental only for meaningful internal gaps", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({
+      loadRoot: "C:\\Music",
+      scanResult: populatedScanResult,
+      lyricResult: {
+        ...populatedLyricDocument,
+        lines: [
+          populatedLyricDocument.lines[0],
+          {
+            ...populatedLyricDocument.lines[1],
+            beginMs: 8_000,
+            endMs: 9_000,
+          },
+        ],
+      },
+    });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+    await playSongFromLibrary(user, "Hey Jude");
+    await user.click(screen.getByRole("button", { name: "Perform" }));
+
+    const audio = getAudioElement();
+    setAudioNumberProperty(audio, "currentTime", 5);
+    fireEvent.timeUpdate(audio);
+
+    expect(await screen.findByLabelText("Instrumental section")).toBeInTheDocument();
+    expect(screen.getByText("Seemed so far away")).toBeInTheDocument();
+  });
+
+  it("does not show Instrumental before the first lyric or after the final lyric", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+    await playSongFromLibrary(user, "Hey Jude");
+    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await screen.findByText("Yesterday all my troubles");
+
+    const audio = getAudioElement();
+    setAudioNumberProperty(audio, "currentTime", 0.5);
+    fireEvent.timeUpdate(audio);
+    expect(screen.queryByLabelText("Instrumental section")).not.toBeInTheDocument();
+    expect(screen.getByText("Yesterday all my troubles")).toBeInTheDocument();
+
+    setAudioNumberProperty(audio, "currentTime", 6);
+    fireEvent.timeUpdate(audio);
+    expect(screen.queryByLabelText("Instrumental section")).not.toBeInTheDocument();
+    expect(screen.queryByText("Yesterday all my troubles")).not.toBeInTheDocument();
+    expect(screen.queryByText("Seemed so far away")).not.toBeInTheDocument();
+  });
+
+  it("keeps the lyric state stable while paused and continues after resume", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+    await playSongFromLibrary(user, "Hey Jude");
+    await user.click(screen.getByRole("button", { name: "Perform" }));
+
+    const audio = getAudioElement();
+    setAudioNumberProperty(audio, "currentTime", 1.2);
+    fireEvent.timeUpdate(audio);
+    expect(await screen.findByText("Yesterday all my troubles")).toBeInTheDocument();
+
+    fireEvent.pause(audio);
+    expect(screen.getByText("Yesterday all my troubles")).toBeInTheDocument();
+
+    fireEvent.play(audio);
+    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    setAudioNumberProperty(audio, "currentTime", 4.2);
+    fireEvent.timeUpdate(audio);
+    expect(screen.getByText("Seemed so far away")).toBeInTheDocument();
+  });
+
+  it("shows lyric parser failure without blocking playback", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    tauriMocks.invoke.mockImplementation((command: string, args?: { song?: MediaSong }) => {
+      if (command === "parse_song_lyrics") {
+        return Promise.reject("The lyric file is not a supported TTML document.");
+      }
+      if (command === "resolve_audio_source") {
+        const song = args?.song ?? populatedScanResult.songs[0];
+        return Promise.resolve({ songId: song.id, audioPath: song.audioPath });
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+
+    await playSongFromLibrary(user, "Hey Jude");
+    await user.click(screen.getByRole("button", { name: "Perform" }));
+
+    expect(
+      await screen.findByText("The lyric file is not a supported TTML document."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("contentinfo", { name: "Media transport" })).toHaveTextContent(
+      "Hey Jude",
+    );
+  });
+
+  it("replaces lyrics when loading another song", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    tauriMocks.invoke.mockImplementation((command: string, args?: { song?: MediaSong }) => {
+      if (command === "parse_song_lyrics") {
+        const song = args?.song ?? populatedScanResult.songs[0];
+        return Promise.resolve({
+          ...populatedLyricDocument,
+          sourceSongId: song.id,
+          lines: [
+            {
+              ...populatedLyricDocument.lines[0],
+              id: `line-${song.id}`,
+              text: song.id === "song-b" ? "Jóga lyric line" : "Yesterday all my troubles",
+              segments: [],
+            },
+          ],
+        });
+      }
+      if (command === "resolve_audio_source") {
+        const song = args?.song ?? populatedScanResult.songs[0];
+        return Promise.resolve({ songId: song.id, audioPath: song.audioPath });
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+    await playSongFromLibrary(user, "Hey Jude");
+    await playSongFromLibrary(user, "Jóga");
+    await user.click(screen.getByRole("button", { name: "Perform" }));
+
+    const audio = getAudioElement();
+    setAudioNumberProperty(audio, "currentTime", 1.2);
+    fireEvent.timeUpdate(audio);
+
+    expect(await screen.findByText("Jóga lyric line")).toBeInTheDocument();
+    expect(screen.queryByText("Yesterday all my troubles")).not.toBeInTheDocument();
   });
 
   it("shows a zero-file scan state", async () => {

@@ -6,8 +6,7 @@ mod scanner;
 use models::{LibraryIndex, LibraryScanResult, LibrarySettings, MediaSong, ResolvedAudioSource};
 use persistence::{
     clear_library_index_for_root, library_index_path, load_library_index_for_root,
-    read_library_settings, same_root, settings_path, write_library_index_atomically,
-    write_library_settings,
+    read_library_settings, same_root, write_library_index_atomically, write_library_settings,
 };
 use playback::resolve_audio_source_for_song;
 use scanner::{path_to_string, scan_media_library_path};
@@ -93,3 +92,6 @@ pub fn resolve_audio_source(
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) use persistence::settings_path;
+pub(crate) use playback::resolve_lyric_source_for_song;

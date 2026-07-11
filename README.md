@@ -49,6 +49,12 @@ Library songs can be loaded directly into the player as a playback foundation. L
 
 The app owns one persistent audio element at the shell level. The bottom transport controls play, pause, seek, and volume, while the top bar shows current-song metadata. Queue-driven playback and lyric rendering are not implemented yet.
 
+## Lyrics Parsing
+
+The Rust lyrics subsystem parses discovered `.ttml` files into a renderer-neutral timed lyric document. Parsed timing uses absolute milliseconds and supports the current foundation subset: `<tt>`, `<body>`, `<div>`, timed `<p>` lines, nested `<span>` text segments, `begin`, `end`, `dur`, clock times such as `00:01:02.345`, and offset times such as `2.5s` or `2500ms`.
+
+The parser decodes XML entities, preserves Unicode text, reports recoverable warnings for imperfect timing, and rejects malformed or unsafe inputs. Lyrics are not rendered yet, parsed lyrics are not cached yet, and future visual effects will consume the normalized timing data rather than changing parser output.
+
 ## Validation
 
 ```powershell

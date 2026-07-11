@@ -1,4 +1,4 @@
-import { type ReactElement, useCallback, useMemo, useRef, useState } from "react";
+import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { MediaSong } from "./media-library/types";
 
@@ -28,12 +28,18 @@ export type AudioPlayer = {
 export function useAudioPlayer(): AudioPlayer {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const loadTokenRef = useRef(0);
+  const isReplacingSourceRef = useRef(false);
+  const statusRef = useRef<PlaybackStatus>("idle");
   const [currentSong, setCurrentSong] = useState<MediaSong | null>(null);
   const [status, setStatus] = useState<PlaybackStatus>("idle");
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(0.8);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   const applyVolume = useCallback((nextVolume: number) => {
     const clampedVolume = clamp(nextVolume, 0, 1);
@@ -52,6 +58,7 @@ export function useAudioPlayer(): AudioPlayer {
     try {
       setError(null);
       await audio.play();
+      setStatus("playing");
     } catch (playError) {
       console.error("Audio playback could not start.", playError);
       setStatus(audio.readyState > 0 ? "paused" : "ready");
@@ -87,6 +94,7 @@ export function useAudioPlayer(): AudioPlayer {
       setError(null);
 
       if (audio) {
+        isReplacingSourceRef.current = true;
         audio.pause();
         audio.removeAttribute("src");
         audio.load();
@@ -97,6 +105,7 @@ export function useAudioPlayer(): AudioPlayer {
       try {
         const resolved = await invoke<ResolvedAudioSource>("resolve_audio_source", { song });
         if (loadTokenRef.current !== token || resolved.songId !== song.id) {
+          isReplacingSourceRef.current = false;
           return;
         }
 
@@ -109,9 +118,13 @@ export function useAudioPlayer(): AudioPlayer {
         activeAudio.dataset.songId = song.id;
         activeAudio.src = sourceUrl;
         activeAudio.load();
+        isReplacingSourceRef.current = false;
 
         try {
           await activeAudio.play();
+          if (loadTokenRef.current === token) {
+            setStatus("playing");
+          }
         } catch (playError) {
           if (loadTokenRef.current !== token) {
             return;
@@ -121,6 +134,7 @@ export function useAudioPlayer(): AudioPlayer {
           setError("Playback could not start. Press Play to try again.");
         }
       } catch (resolveError) {
+        isReplacingSourceRef.current = false;
         if (loadTokenRef.current !== token) {
           return;
         }
@@ -132,59 +146,62 @@ export function useAudioPlayer(): AudioPlayer {
     [volume],
   );
 
-  const audioElement = useMemo(
-    () => (
-      <audio
-        aria-hidden="true"
-        data-testid="persistent-audio-element"
-        onCanPlay={() => {
-          if (status === "loading") {
-            setStatus("ready");
-          }
-        }}
-        onDurationChange={(event) => {
-          setDuration(finiteMediaTime(event.currentTarget.duration));
-        }}
-        onEnded={() => {
-          setCurrentTime(finiteMediaTime(audioRef.current?.duration ?? 0));
-          setStatus("ended");
-        }}
-        onError={(event) => {
-          console.error("Audio element error.", event.currentTarget.error);
-          setStatus("error");
-          setError(mediaErrorMessage(event.currentTarget.error));
-        }}
-        onLoadedMetadata={(event) => {
-          setDuration(finiteMediaTime(event.currentTarget.duration));
-          setCurrentTime(finiteMediaTime(event.currentTarget.currentTime));
-        }}
-        onLoadStart={() => {
-          setStatus("loading");
-          setError(null);
-        }}
-        onPause={(event) => {
-          if (!event.currentTarget.ended && status !== "loading" && status !== "error") {
-            setStatus("paused");
-          }
-        }}
-        onPlay={() => {
-          setStatus("playing");
-          setError(null);
-        }}
-        onSeeked={(event) => {
-          setCurrentTime(finiteMediaTime(event.currentTarget.currentTime));
-        }}
-        onSeeking={(event) => {
-          setCurrentTime(finiteMediaTime(event.currentTarget.currentTime));
-        }}
-        onTimeUpdate={(event) => {
-          setCurrentTime(finiteMediaTime(event.currentTarget.currentTime));
-        }}
-        preload="metadata"
-        ref={audioRef}
-      />
-    ),
-    [status],
+  const audioElement = (
+    <audio
+      aria-hidden="true"
+      data-testid="persistent-audio-element"
+      onCanPlay={(event) => {
+        if (statusRef.current === "loading" && event.currentTarget.paused) {
+          setStatus("ready");
+        }
+      }}
+      onDurationChange={(event) => {
+        setDuration(finiteMediaTime(event.currentTarget.duration));
+      }}
+      onEnded={() => {
+        setCurrentTime(finiteMediaTime(audioRef.current?.duration ?? 0));
+        setStatus("ended");
+      }}
+      onError={(event) => {
+        isReplacingSourceRef.current = false;
+        console.error("Audio element error.", event.currentTarget.error);
+        setStatus("error");
+        setError(mediaErrorMessage(event.currentTarget.error));
+      }}
+      onLoadedMetadata={(event) => {
+        setDuration(finiteMediaTime(event.currentTarget.duration));
+        setCurrentTime(finiteMediaTime(event.currentTarget.currentTime));
+      }}
+      onLoadStart={() => {
+        setStatus("loading");
+        setError(null);
+      }}
+      onPause={(event) => {
+        if (
+          !isReplacingSourceRef.current &&
+          !event.currentTarget.ended &&
+          statusRef.current !== "loading" &&
+          statusRef.current !== "error"
+        ) {
+          setStatus("paused");
+        }
+      }}
+      onPlay={() => {
+        setStatus("playing");
+        setError(null);
+      }}
+      onSeeked={(event) => {
+        setCurrentTime(finiteMediaTime(event.currentTarget.currentTime));
+      }}
+      onSeeking={(event) => {
+        setCurrentTime(finiteMediaTime(event.currentTarget.currentTime));
+      }}
+      onTimeUpdate={(event) => {
+        setCurrentTime(finiteMediaTime(event.currentTarget.currentTime));
+      }}
+      preload="metadata"
+      ref={audioRef}
+    />
   );
 
   return {

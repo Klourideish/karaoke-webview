@@ -1,6 +1,7 @@
 import type { AudioPlayer } from "../audioPlayer";
 import { useMediaLibrary } from "../media-library/useMediaLibrary";
 import { BottomMediaBar } from "../player/BottomMediaBar";
+import { useSongLyrics } from "../useSongLyrics";
 import { LibraryWorkspace } from "../workspaces/LibraryWorkspace";
 import { PerformWorkspace } from "../workspaces/PerformWorkspace";
 import { PlaceholderWorkspace } from "../workspaces/PlaceholderWorkspace";
@@ -31,6 +32,8 @@ export function AppShell({
   onSelectTab: (tab: AppTab) => void;
   singers: Singer[];
 }) {
+  const lyrics = useSongLyrics(audioPlayer.currentSong);
+
   return (
     <div className="app-shell">
       <TopInfoBar audioPlayer={audioPlayer} />
@@ -46,7 +49,12 @@ export function AppShell({
 
         <TabRail activeTab={activeTab} onSelectTab={onSelectTab} />
         <main className="main-content" aria-labelledby="view-heading">
-          <MainContent audioPlayer={audioPlayer} mediaLibrary={mediaLibrary} view={activeView} />
+          <MainContent
+            audioPlayer={audioPlayer}
+            lyrics={lyrics}
+            mediaLibrary={mediaLibrary}
+            view={activeView}
+          />
         </main>
         <QueuePanel />
       </div>
@@ -59,10 +67,12 @@ export function AppShell({
 
 function MainContent({
   audioPlayer,
+  lyrics,
   mediaLibrary,
   view,
 }: {
   audioPlayer: AudioPlayer;
+  lyrics: ReturnType<typeof useSongLyrics>;
   mediaLibrary: ReturnType<typeof useMediaLibrary>;
   view: TabDefinition;
 }) {
@@ -71,6 +81,7 @@ function MainContent({
       <PerformWorkspace
         audioPlayer={audioPlayer}
         heading={view.heading}
+        lyrics={lyrics}
         description={view.description}
       />
     );

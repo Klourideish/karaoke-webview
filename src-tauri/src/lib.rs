@@ -1,3 +1,4 @@
+mod lyrics;
 mod media_library;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -8,6 +9,7 @@ pub fn run() {
             media_library::clear_library_index,
             media_library::load_library_index,
             media_library::load_library_settings,
+            lyrics::parse_song_lyrics,
             media_library::resolve_audio_source,
             media_library::save_library_index,
             media_library::save_library_root,
