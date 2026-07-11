@@ -6,4 +6,5 @@ export type MicrophoneDiscoveryState = {
   status: "loading" | "success" | "failure";
   sources: LocalMicrophoneSource[];
   error: string | null;
+  isRefreshing: boolean;
 };

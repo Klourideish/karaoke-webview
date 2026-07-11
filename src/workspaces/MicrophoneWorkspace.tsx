@@ -1,7 +1,10 @@
-import { useLocalMicrophones } from "../microphones/useLocalMicrophones";
+import type { useLocalMicrophones } from "../microphones/useLocalMicrophones";
 
-export function MicrophoneWorkspace() {
-  const discovery = useLocalMicrophones();
+export function MicrophoneWorkspace({
+  discovery,
+}: {
+  discovery: ReturnType<typeof useLocalMicrophones>;
+}) {
   const isLoading = discovery.status === "loading";
 
   return (
@@ -15,7 +18,7 @@ export function MicrophoneWorkspace() {
           className="microphone-refresh-button"
           type="button"
           onClick={() => void discovery.refresh()}
-          disabled={isLoading}
+          disabled={discovery.isRefreshing}
         >
           Refresh
         </button>

@@ -1,11 +1,12 @@
 import { StrictMode } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { LyricDocument } from "./lyrics";
 import type { LibraryScanResult, MediaSong } from "./media-library/types";
 import type { LocalMicrophoneSource } from "./microphones/types";
+import { LOCAL_MICROPHONE_REFRESH_INTERVAL_MS } from "./microphones/useLocalMicrophones";
 
 const tauriMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -303,6 +304,10 @@ beforeEach(() => {
   mockInvokeWith();
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 function createDeferred<T>() {
   let resolve: (value: T) => void = () => undefined;
   let reject: (reason?: unknown) => void = () => undefined;
@@ -498,6 +503,37 @@ describe("Microphone workspace", () => {
         /channel|capture|assign/i.test(String(command)),
       ),
     ).toBe(false);
+  });
+
+  it("updates the visible registry after an automatic discovery refresh", async () => {
+    vi.useFakeTimers();
+    let discoveryCount = 0;
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "discover_local_microphone_sources") {
+        discoveryCount += 1;
+        return Promise.resolve(discoveryCount === 1 ? [] : discoveredMicrophones);
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    render(<App />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Microphones" }));
+    expect(screen.getByText("No local microphone inputs were found.")).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(LOCAL_MICROPHONE_REFRESH_INTERVAL_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("2 local microphone inputs discovered.")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "USB Microphone" })).toHaveLength(2);
   });
 });
 
