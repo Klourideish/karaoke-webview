@@ -30,6 +30,15 @@
 - Do not add a local HTTP server unless explicitly justified by a future task.
 - Do not implement future-phase features early.
 
+### Authoritative Host Direction
+
+- The Windows application is the authoritative host for sessions, singers, playback, lyrics, queue outcomes, microphones, performances, and future scoring/history.
+- External clients are lightweight requesters and selected-state consumers; the host validates requests and emits authoritative outcomes.
+- Networking is an adapter around host-domain actions, not a second source of domain truth.
+- Keep media library, playback, lyrics, microphone, protocol, and future scoring responsibilities in separate modules.
+- Add new domain work around existing boundaries; do not leak Android-, UDP-, WebRTC-, or other transport-specific concepts into core models.
+- Android clients are planned; no Apple client scope is planned.
+
 ## Media Direction For Future Tasks
 
 - Audio will use `.opus`.

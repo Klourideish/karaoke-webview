@@ -2,6 +2,8 @@
 
 Karaoke Webview is a new Windows-only desktop foundation for a future karaoke application. It is built with Tauri 2, React, TypeScript, Vite, npm, Vitest, ESLint, and Prettier.
 
+This is a personal, local-first experimental project. Its planned architecture uses this Windows application as the authoritative karaoke host, with a separate lightweight Android microphone client. Networking is architectural direction only and is not implemented. See [Architecture vision](docs/architecture-vision.md), [Domain model](docs/domain-model.md), [Performance lifecycle](docs/performance-lifecycle.md), [Protocol draft](docs/protocol-draft.md), and [Roadmap](docs/roadmap.md).
+
 This project was created independently. The separate browser-based `karaoke-app` repository is reference material only; no source code, configuration, dependencies, scripts, assets, documentation, architecture, or Git history are shared.
 
 ## Prerequisites
@@ -55,7 +57,7 @@ The Rust lyrics subsystem parses discovered `.ttml` files into a renderer-neutra
 
 The parser decodes XML entities, preserves Unicode text, reports recoverable warnings for imperfect timing, and rejects malformed or unsafe inputs. The Perform workspace renders a basic synchronized current/next lyric view from the persistent audio clock.
 
-Timed TTML spans are treated as renderer-neutral fragments. A fragment may be a word, syllable, punctuation mark, or sung text piece; the renderer preserves source fragment order and spacing, then applies static past, active, and upcoming states to the current line. Animated effects, romanization, and parsed-lyrics caching are not implemented yet, and future visual effects will consume the normalized timing data rather than changing parser output.
+Timed TTML spans are treated as renderer-neutral fragments. A fragment may be a word, syllable, punctuation mark, or sung text piece; the renderer preserves source fragment order and spacing, then applies a restrained classic karaoke fill to the current line. The fill is driven by the authoritative audio clock: past fragments are filled, the active fragment fills left to right, and upcoming fragments remain unfilled. Romanization, parsed-lyrics caching, selectable effect presets, and broader visual effects are not implemented yet.
 
 ## Validation
 

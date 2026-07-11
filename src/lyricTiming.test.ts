@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LyricTimingEngine } from "./lyricTiming";
+import { LyricTimingEngine, lyricFragmentProgress } from "./lyricTiming";
 import type { LyricDocument } from "./lyrics";
 
 const lyricDocument: LyricDocument = {
@@ -263,5 +263,34 @@ describe("LyricTimingEngine", () => {
     const engine = new LyricTimingEngine(lyricDocument);
 
     expect(engine.lookup(2_000).activeFragments).toEqual([]);
+  });
+
+  it("calculates clamped active fragment progress", () => {
+    const fragment = lyricDocument.lines[0].segments[0];
+
+    expect(lyricFragmentProgress(fragment, 1_000)).toBe(0);
+    expect(lyricFragmentProgress(fragment, 1_250)).toBeCloseTo(0.5);
+    expect(lyricFragmentProgress(fragment, 1_500)).toBe(1);
+    expect(lyricFragmentProgress(fragment, 900)).toBe(0);
+    expect(lyricFragmentProgress(fragment, 1_800)).toBe(1);
+    expect(
+      lyricFragmentProgress(
+        {
+          ...fragment,
+          beginMs: 1_000,
+          endMs: 1_000,
+        },
+        1_000,
+      ),
+    ).toBe(0);
+  });
+
+  it("uses half-open active fragment boundaries for adjacent fragments", () => {
+    const engine = new LyricTimingEngine(lyricDocument);
+
+    const firstEndState = engine.lookup(1_500);
+
+    expect(firstEndState.activeFragmentIds).toEqual(["segment-b"]);
+    expect(firstEndState.currentFragmentProgress).toBe(0);
   });
 });

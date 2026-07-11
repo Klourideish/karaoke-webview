@@ -62,7 +62,7 @@ export class LyricTimingEngine {
       activeFragmentIndex:
         activeFragmentIndex !== null && activeFragmentIndex >= 0 ? activeFragmentIndex : null,
       currentFragmentProgress: activeFragments[0]
-        ? fragmentProgress(activeFragments[0], timeMs)
+        ? lyricFragmentProgress(activeFragments[0], timeMs)
         : 0,
       currentLineProgress: activeLine ? lineProgress(activeLine, timeMs) : 0,
       timelineState,
@@ -221,7 +221,7 @@ function lineProgress(line: LyricLine, timeMs: number) {
   return Math.min(1, Math.max(0, (timeMs - line.beginMs) / duration));
 }
 
-function fragmentProgress(segment: LyricSegment, timeMs: number) {
+export function lyricFragmentProgress(segment: LyricSegment, timeMs: number) {
   const duration = segment.endMs - segment.beginMs;
   if (duration <= 0) {
     return 0;

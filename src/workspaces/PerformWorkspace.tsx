@@ -1,5 +1,6 @@
+import type { CSSProperties } from "react";
 import type { AudioPlayer } from "../audioPlayer";
-import type { ActiveLyricState } from "../lyricTiming";
+import { lyricFragmentProgress, type ActiveLyricState } from "../lyricTiming";
 import type { LyricLine, LyricSegment } from "../lyrics";
 import { playbackStatusLabel } from "../player/playbackFormatting";
 import { useLyricPlaybackClock } from "../useLyricPlaybackClock";
@@ -90,12 +91,20 @@ function CurrentLyricLine({
     <span className="lyric-fragment-line" aria-label={lineText(currentLine)}>
       {currentLine.segments.map((segment) => {
         const fragmentState = fragmentDisplayState(segment, lyricState, currentTimeMs);
+        const fillProgress = fragmentFillProgress(segment, fragmentState, currentTimeMs);
         return (
           <span
             className={`lyric-fragment lyric-fragment-${fragmentState}`}
             data-fragment-id={segment.id}
             data-fragment-state={fragmentState}
+            data-fill-progress={fillProgress.toFixed(3)}
+            data-text={segment.text}
             key={segment.id}
+            style={
+              {
+                "--lyric-fill-progress": fillProgress,
+              } as CSSProperties
+            }
           >
             {segment.text}
           </span>
@@ -119,6 +128,22 @@ function fragmentDisplayState(
   }
 
   return "upcoming";
+}
+
+function fragmentFillProgress(
+  segment: LyricSegment,
+  fragmentState: "active" | "past" | "upcoming",
+  currentTimeMs: number,
+) {
+  if (fragmentState === "past") {
+    return 1;
+  }
+
+  if (fragmentState === "active") {
+    return lyricFragmentProgress(segment, currentTimeMs);
+  }
+
+  return 0;
 }
 
 function lineText(line: LyricLine) {

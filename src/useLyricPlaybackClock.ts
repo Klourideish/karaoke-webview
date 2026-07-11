@@ -104,7 +104,7 @@ function publishSnapshot(
   const sampledTimeMs = getCurrentTime() * 1_000;
   const state = timingEngine.lookup(sampledTimeMs);
   const signature = lyricStateSignature(state);
-  if (signatureRef.current === signature) {
+  if (signatureRef.current === signature && state.activeFragmentIds.length === 0) {
     return;
   }
 

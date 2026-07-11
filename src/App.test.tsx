@@ -989,6 +989,21 @@ describe("Library workspace", () => {
       "active",
       "upcoming",
     ]);
+    expect(fragments.map((fragment) => fragment.getAttribute("data-fill-progress"))).toEqual([
+      "1.000",
+      "1.000",
+      "0.200",
+      "0.000",
+    ]);
+    expect((fragments[2] as HTMLElement).style.getPropertyValue("--lyric-fill-progress")).toBe(
+      "0.2",
+    );
+    expect(fragments.map((fragment) => fragment.getAttribute("data-text"))).toEqual([
+      "Time ",
+      "to ",
+      "cele",
+      "brate",
+    ]);
     expect(container.querySelector(".lyric-line-secondary")?.textContent).toBe("다음 줄");
     expect(
       container.querySelector(".lyric-line-secondary .lyric-fragment"),
@@ -1042,6 +1057,10 @@ describe("Library workspace", () => {
 
     expect(await screen.findByText("Whole line lyric")).toBeInTheDocument();
     expect(container.querySelector(".lyric-fragment-active")).not.toBeInTheDocument();
+    expect(container.querySelector(".lyric-fragment")).toHaveAttribute(
+      "data-fill-progress",
+      "0.000",
+    );
   });
 
   it("updates rapid lyric fragments from animation frames between sparse timeupdate events", async () => {
@@ -1110,12 +1129,20 @@ describe("Library workspace", () => {
         "active",
       ),
     );
+    expect(container.querySelector('[data-fragment-id="rapid-a"]')).toHaveAttribute(
+      "data-fill-progress",
+      "0.500",
+    );
 
     setAudioNumberProperty(audio, "currentTime", 1.08);
     runAnimationFrame();
     expect(container.querySelector('[data-fragment-id="rapid-b"]')).toHaveAttribute(
       "data-fragment-state",
       "active",
+    );
+    expect(container.querySelector('[data-fragment-id="rapid-b"]')).toHaveAttribute(
+      "data-fill-progress",
+      "0.500",
     );
 
     fireEvent.pause(audio);
@@ -1126,6 +1153,10 @@ describe("Library workspace", () => {
       "data-fragment-state",
       "active",
     );
+    expect(container.querySelector('[data-fragment-id="rapid-b"]')).toHaveAttribute(
+      "data-fill-progress",
+      "0.500",
+    );
     expect(animationFrameCallbacks.size).toBeLessThanOrEqual(queuedFrameCount);
 
     fireEvent.play(audio);
@@ -1133,6 +1164,10 @@ describe("Library workspace", () => {
     expect(container.querySelector('[data-fragment-id="rapid-c"]')).toHaveAttribute(
       "data-fragment-state",
       "active",
+    );
+    expect(container.querySelector('[data-fragment-id="rapid-c"]')).toHaveAttribute(
+      "data-fill-progress",
+      "0.333",
     );
 
     unmount();
@@ -1158,6 +1193,10 @@ describe("Library workspace", () => {
     expect(container.querySelector(".lyric-fragment")).toHaveAttribute(
       "data-fragment-state",
       "upcoming",
+    );
+    expect(container.querySelector(".lyric-fragment")).toHaveAttribute(
+      "data-fill-progress",
+      "0.000",
     );
 
     setAudioNumberProperty(audio, "currentTime", 4.2);
