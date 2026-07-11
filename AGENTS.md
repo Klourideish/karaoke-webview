@@ -17,6 +17,8 @@
 - Keep responsibilities in focused modules; avoid growing multi-responsibility files.
 - Prefer behavior-preserving extraction before adding new subsystem responsibilities.
 - Do not split tightly coupled state machines solely to satisfy line-count targets.
+- Keep Rust media responsibilities focused: scanner, persistence, playback access, and future lyrics belong in separate modules.
+- Do not add TTML parsing to the media-library scanner module.
 - Preserve the desktop shell regions: top information bar, singer bar, left navigation, active central workspace, persistent right queue, and persistent bottom transport.
 - Singer IDs are local stable identifiers; singer display names are editable metadata.
 - Future voting and queue entries should reference singer IDs rather than display names.
