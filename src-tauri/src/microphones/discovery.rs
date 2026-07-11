@@ -56,7 +56,7 @@ pub(crate) fn map_platform_sources(snapshot: PlatformDiscovery) -> Vec<Discovere
     sources
 }
 
-fn stable_source_id(platform_id: &str) -> String {
+pub(crate) fn stable_source_id(platform_id: &str) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in platform_id.as_bytes() {
         hash ^= u64::from(*byte);
@@ -90,7 +90,6 @@ impl DiscoveryError {
         }
     }
 
-    #[cfg(any(test, not(target_os = "windows")))]
     pub(crate) fn message(message: &'static str) -> Self {
         Self {
             message: message.to_string(),

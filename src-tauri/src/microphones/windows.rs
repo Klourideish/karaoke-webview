@@ -16,7 +16,9 @@ use windows::{
     },
 };
 
-use super::discovery::{DiscoveryError, PlatformDiscovery, PlatformMicrophoneSource};
+use super::discovery::{
+    stable_source_id, DiscoveryError, PlatformDiscovery, PlatformMicrophoneSource,
+};
 
 const RPC_E_CHANGED_MODE: HRESULT = HRESULT(0x80010106u32 as i32);
 
@@ -97,6 +99,47 @@ fn default_capture_id(enumerator: &IMMDeviceEnumerator) -> Option<String> {
     }
 }
 
+pub(crate) fn active_capture_device(source_id: &str) -> Result<IMMDevice, DiscoveryError> {
+    // SAFETY: COM is initialized by the caller and the returned interfaces own their lifetimes.
+    let enumerator: IMMDeviceEnumerator = unsafe {
+        CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|error| {
+            DiscoveryError::platform(
+                "Could not create the Windows audio endpoint enumerator.",
+                error,
+            )
+        })?
+    };
+    // SAFETY: The enumerator is valid and only active capture endpoint metadata is requested.
+    let collection = unsafe {
+        enumerator
+            .EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE)
+            .map_err(|error| {
+                DiscoveryError::platform("Could not enumerate active microphone endpoints.", error)
+            })?
+    };
+    // SAFETY: The collection is a valid COM interface.
+    let count = unsafe { collection.GetCount() }.map_err(|error| {
+        DiscoveryError::platform("Could not count active microphone endpoints.", error)
+    })?;
+
+    for index in 0..count {
+        // SAFETY: index is bounded by the collection count.
+        let device = unsafe { collection.Item(index) }.map_err(|error| {
+            DiscoveryError::platform("Could not inspect an active microphone endpoint.", error)
+        })?;
+        let platform_id = device_id(&device).map_err(|error| {
+            DiscoveryError::platform("Could not read active microphone identity.", error)
+        })?;
+        if stable_source_id(&platform_id) == source_id {
+            return Ok(device);
+        }
+    }
+
+    Err(DiscoveryError::message(
+        "The selected microphone is no longer available.",
+    ))
+}
+
 fn device_id(device: &IMMDevice) -> windows::core::Result<String> {
     // SAFETY: GetId returns a null-terminated COM-allocated string for this valid endpoint.
     let value = unsafe { device.GetId()? };
@@ -133,12 +176,12 @@ fn owned_pwstr_to_string(value: PWSTR) -> windows::core::Result<String> {
     result
 }
 
-struct ComApartment {
+pub(crate) struct ComApartment {
     should_uninitialize: bool,
 }
 
 impl ComApartment {
-    fn initialize() -> Result<Self, DiscoveryError> {
+    pub(crate) fn initialize() -> Result<Self, DiscoveryError> {
         // SAFETY: Initializes COM for the current command thread without sharing raw pointers.
         let result = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         if result == RPC_E_CHANGED_MODE {
