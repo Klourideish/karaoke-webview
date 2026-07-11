@@ -1,0 +1,1094 @@
+import { StrictMode } from "react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { App } from "./App";
+import type { LibraryScanResult, MediaSong } from "./media-library/types";
+
+const tauriMocks = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  open: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (filePath: string) => `asset://localhost/${encodeURIComponent(filePath)}`,
+  invoke: tauriMocks.invoke,
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: tauriMocks.open,
+}));
+
+const emptyScanResult: LibraryScanResult = {
+  rootPath: "C:\\Music",
+  songs: [],
+  issues: [],
+  scannedDirectoryCount: 1,
+  scannedFileCount: 0,
+  supportedFileCount: 0,
+  audioFileCount: 0,
+  lyricFileCount: 0,
+  completedAt: "1000Z",
+};
+
+const populatedScanResult: LibraryScanResult = {
+  rootPath: "C:\\Music",
+  songs: [
+    {
+      id: "song-a",
+      title: "Hey Jude",
+      artist: "The Beatles",
+      displayName: "The Beatles - Hey Jude",
+      directoryPath: "C:\\Music\\Pop",
+      audioPath: "C:\\Music\\Pop\\The Beatles - Hey Jude.opus",
+      lyricPath: "C:\\Music\\Pop\\The Beatles - Hey Jude.ttml",
+      fileStem: "The Beatles - Hey Jude",
+    },
+    {
+      id: "song-b",
+      title: "Jóga",
+      artist: "Björk",
+      displayName: "Björk - Jóga",
+      directoryPath: "C:\\Music\\Alt",
+      audioPath: "C:\\Music\\Alt\\Björk - Jóga.opus",
+      lyricPath: "C:\\Music\\Alt\\Björk - Jóga.ttml",
+      fileStem: "Björk - Jóga",
+    },
+  ],
+  issues: [
+    {
+      id: "issue-a",
+      kind: "missing-lyrics",
+      path: "Loose\\Missing Lyrics.opus",
+      message: "This .opus file has no matching .ttml file in the same folder.",
+    },
+  ],
+  scannedDirectoryCount: 3,
+  scannedFileCount: 5,
+  supportedFileCount: 4,
+  audioFileCount: 2,
+  lyricFileCount: 2,
+  completedAt: "1000Z",
+};
+
+const cachedScanResult: LibraryScanResult = {
+  ...populatedScanResult,
+  songs: [
+    {
+      id: "song-cached",
+      title: "Cached Song",
+      artist: "Cached Artist",
+      displayName: "Cached Artist - Cached Song",
+      directoryPath: "C:\\Music\\Cached",
+      audioPath: "C:\\Music\\Cached\\Cached Artist - Cached Song.opus",
+      lyricPath: "C:\\Music\\Cached\\Cached Artist - Cached Song.ttml",
+      fileStem: "Cached Artist - Cached Song",
+    },
+  ],
+  issues: [],
+  scannedDirectoryCount: 2,
+  scannedFileCount: 2,
+  supportedFileCount: 2,
+  audioFileCount: 1,
+  lyricFileCount: 1,
+  completedAt: "900Z",
+};
+
+const noSupportedFilesScanResult: LibraryScanResult = {
+  ...emptyScanResult,
+  scannedDirectoryCount: 2,
+  scannedFileCount: 4,
+};
+
+const unpairedCandidatesScanResult: LibraryScanResult = {
+  ...emptyScanResult,
+  issues: [
+    {
+      id: "issue-unpaired",
+      kind: "missing-lyrics",
+      path: "Artist\\Artist - Song.opus",
+      message: "This .opus file has no matching .ttml file in the same folder.",
+    },
+  ],
+  scannedDirectoryCount: 2,
+  scannedFileCount: 2,
+  supportedFileCount: 1,
+  audioFileCount: 1,
+  lyricFileCount: 0,
+};
+
+function mockInvokeWith({
+  cacheResult = { status: "miss", scanResult: null, message: null },
+  loadRoot = null,
+  scanResult = emptyScanResult,
+}: {
+  cacheResult?: {
+    status: "hit" | "miss" | "corrupt" | "root-mismatch" | "unsupported-schema";
+    scanResult: LibraryScanResult | null;
+    message: string | null;
+  };
+  loadRoot?: string | null;
+  scanResult?: LibraryScanResult;
+} = {}) {
+  tauriMocks.invoke.mockImplementation((command: string, args?: { song?: MediaSong }) => {
+    if (command === "load_library_settings") {
+      return Promise.resolve({ libraryRoot: loadRoot });
+    }
+
+    if (command === "save_library_root") {
+      return Promise.resolve({ libraryRoot: "C:\\Music" });
+    }
+
+    if (command === "load_library_index") {
+      return Promise.resolve(cacheResult);
+    }
+
+    if (command === "save_library_index") {
+      return Promise.resolve();
+    }
+
+    if (command === "clear_library_index") {
+      return Promise.resolve();
+    }
+
+    if (command === "resolve_audio_source") {
+      const firstSong = args?.song ?? scanResult.songs[0] ?? populatedScanResult.songs[0];
+      return Promise.resolve({
+        songId: firstSong.id,
+        audioPath: firstSong.audioPath,
+      });
+    }
+
+    if (command === "scan_media_library") {
+      return Promise.resolve(scanResult);
+    }
+
+    return Promise.reject(new Error(`Unexpected command: ${command}`));
+  });
+}
+
+beforeEach(() => {
+  tauriMocks.invoke.mockReset();
+  tauriMocks.open.mockReset();
+  tauriMocks.open.mockResolvedValue(null);
+  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+  vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+  mockInvokeWith();
+});
+
+function createDeferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (reason?: unknown) => void = () => undefined;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, reject, resolve };
+}
+
+function renderStrictApp() {
+  return render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+}
+
+async function openLibraryWorkspace(user = userEvent.setup()) {
+  await user.click(screen.getByRole("button", { name: "Library" }));
+  return user;
+}
+
+function getAudioElement() {
+  return screen.getByTestId("persistent-audio-element") as HTMLAudioElement;
+}
+
+function setAudioNumberProperty(
+  audio: HTMLAudioElement,
+  property: "currentTime" | "duration",
+  value: number,
+) {
+  Object.defineProperty(audio, property, {
+    configurable: true,
+    value,
+    writable: true,
+  });
+}
+
+function getSongRow(title: string) {
+  const row = screen.getByText(title).closest("article");
+  if (!row) {
+    throw new Error(`Could not find song row for ${title}`);
+  }
+
+  return row;
+}
+
+async function playSongFromLibrary(user: ReturnType<typeof userEvent.setup>, title: string) {
+  await user.click(within(getSongRow(title)).getByRole("button", { name: "Play" }));
+}
+
+describe("App shell", () => {
+  it("shows Perform as the default active workspace", async () => {
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: "Karaoke Webview" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Perform" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Perform" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("load_library_settings"));
+  });
+
+  it("renders readable horizontal navigation labels", async () => {
+    const { container } = render(<App />);
+
+    expect(screen.getByRole("button", { name: "Perform" })).toHaveTextContent("Perform");
+    expect(screen.getByRole("button", { name: "Library" })).toHaveTextContent("Library");
+    expect(screen.getByRole("button", { name: "Microphones" })).toHaveTextContent("Microphones");
+    expect(screen.getByRole("button", { name: "Settings" })).toHaveTextContent("Settings");
+    expect(container.querySelector(".rotated-tab-label")).not.toBeInTheDocument();
+    await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("load_library_settings"));
+  });
+
+  it("keeps the queue and bottom transport rendered while Library is active", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Library" }));
+
+    expect(screen.getByRole("heading", { name: "Library" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Queue" })).toBeInTheDocument();
+    expect(screen.getByRole("contentinfo", { name: "Media transport" })).toBeInTheDocument();
+  });
+
+  it("keeps playback interaction only in the bottom transport", async () => {
+    render(<App />);
+
+    const topBar = screen.getByRole("banner", { name: "Application overview" });
+    expect(within(topBar).queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+    await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("load_library_settings"));
+  });
+});
+
+describe("Library workspace", () => {
+  it("shows the no-folder-selected state", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openLibraryWorkspace(user);
+
+    expect(await screen.findByText("No music folder selected.")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Choose music folder" }).length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it("cancelling folder selection preserves the current state", async () => {
+    const user = userEvent.setup();
+    tauriMocks.open.mockResolvedValue(null);
+    render(<App />);
+
+    await openLibraryWorkspace(user);
+    await screen.findByText("No music folder selected.");
+    await user.click(screen.getAllByRole("button", { name: "Choose music folder" })[0]);
+
+    expect(tauriMocks.open).toHaveBeenCalledWith(
+      expect.objectContaining({ directory: true, multiple: false }),
+    );
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "save_library_root",
+      expect.objectContaining({ rootPath: expect.any(String) }),
+    );
+    expect(screen.getByText("No music folder selected.")).toBeInTheDocument();
+  });
+
+  it("successful folder selection persists the root and scans", async () => {
+    const user = userEvent.setup();
+    tauriMocks.open.mockResolvedValue("C:\\Music");
+    mockInvokeWith({ scanResult: populatedScanResult });
+    render(<App />);
+
+    await openLibraryWorkspace(user);
+    await screen.findByText("No music folder selected.");
+    await user.click(screen.getAllByRole("button", { name: "Choose music folder" })[0]);
+
+    await screen.findByText("Hey Jude");
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("save_library_root", { rootPath: "C:\\Music" });
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("scan_media_library", { rootPath: "C:\\Music" });
+  });
+
+  it("restored folder triggers one scan", async () => {
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("scan_media_library", {
+        rootPath: "C:\\Music",
+      }),
+    );
+
+    const scanCalls = tauriMocks.invoke.mock.calls.filter(
+      ([command]) => command === "scan_media_library",
+    );
+    expect(scanCalls).toHaveLength(1);
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("load_library_index", {
+      rootPath: "C:\\Music",
+    });
+  });
+
+  it("shows cached songs before background validation resolves", async () => {
+    const pendingScan = createDeferred<LibraryScanResult>();
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "load_library_index") {
+        return Promise.resolve({
+          status: "hit",
+          scanResult: cachedScanResult,
+          message: null,
+        });
+      }
+
+      if (command === "scan_media_library") {
+        return pendingScan.promise;
+      }
+
+      if (command === "save_library_index") {
+        return Promise.resolve();
+      }
+
+      return Promise.resolve({ libraryRoot: "C:\\Music" });
+    });
+
+    render(<App />);
+    await openLibraryWorkspace();
+
+    expect(await screen.findByText("Cached Song")).toBeInTheDocument();
+    expect(screen.getByText("Showing saved library · checking for changes...")).toBeInTheDocument();
+
+    pendingScan.resolve(populatedScanResult);
+
+    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
+    expect(screen.queryByText("Cached Song")).not.toBeInTheDocument();
+    expect(screen.getByText("Library updated")).toBeInTheDocument();
+  });
+
+  it("keeps cached songs searchable while validation is running", async () => {
+    const user = userEvent.setup();
+    const pendingScan = createDeferred<LibraryScanResult>();
+    mockInvokeWith({
+      loadRoot: "C:\\Music",
+      cacheResult: {
+        status: "hit",
+        scanResult: cachedScanResult,
+        message: null,
+      },
+    });
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "load_library_index") {
+        return Promise.resolve({
+          status: "hit",
+          scanResult: cachedScanResult,
+          message: null,
+        });
+      }
+
+      if (command === "scan_media_library") {
+        return pendingScan.promise;
+      }
+
+      if (command === "save_library_index") {
+        return Promise.resolve();
+      }
+
+      return Promise.resolve({ libraryRoot: "C:\\Music" });
+    });
+
+    render(<App />);
+    await openLibraryWorkspace(user);
+
+    await user.type(await screen.findByLabelText("Search library"), "cached artist");
+    expect(screen.getByText("Cached Song")).toBeInTheDocument();
+    expect(screen.getByText("Showing saved library · checking for changes...")).toBeInTheDocument();
+
+    pendingScan.resolve(populatedScanResult);
+    expect(await screen.findByText("No search results")).toBeInTheDocument();
+  });
+
+  it("preserves cached songs when background validation fails", async () => {
+    const pendingScan = createDeferred<LibraryScanResult>();
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "load_library_index") {
+        return Promise.resolve({
+          status: "hit",
+          scanResult: cachedScanResult,
+          message: null,
+        });
+      }
+
+      if (command === "scan_media_library") {
+        return pendingScan.promise;
+      }
+
+      if (command === "save_library_index") {
+        return Promise.resolve();
+      }
+
+      return Promise.resolve({ libraryRoot: "C:\\Music" });
+    });
+
+    render(<App />);
+    await openLibraryWorkspace();
+    await screen.findByText("Cached Song");
+
+    pendingScan.reject("The selected library folder is not available.");
+
+    expect(
+      await screen.findByText("Library check failed · showing last known results"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Cached Song")).toBeInTheDocument();
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "save_library_index",
+      expect.objectContaining({ scanResult: expect.anything() }),
+    );
+  });
+
+  it("does not render a root-mismatched cache", async () => {
+    const pendingScan = createDeferred<LibraryScanResult>();
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "load_library_index") {
+        return Promise.resolve({
+          status: "root-mismatch",
+          scanResult: null,
+          message: null,
+        });
+      }
+
+      if (command === "scan_media_library") {
+        return pendingScan.promise;
+      }
+
+      if (command === "save_library_index") {
+        return Promise.resolve();
+      }
+
+      return Promise.resolve({ libraryRoot: "C:\\Music" });
+    });
+
+    render(<App />);
+    await openLibraryWorkspace();
+
+    expect(await screen.findByText("Checking library for changes...")).toBeInTheDocument();
+    expect(screen.queryByText("Cached Song")).not.toBeInTheDocument();
+
+    pendingScan.resolve(populatedScanResult);
+    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
+  });
+
+  it("does not duplicate authoritative validation scans in StrictMode", async () => {
+    const pendingScan = createDeferred<LibraryScanResult>();
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "load_library_index") {
+        return Promise.resolve({
+          status: "hit",
+          scanResult: cachedScanResult,
+          message: null,
+        });
+      }
+
+      if (command === "scan_media_library") {
+        return pendingScan.promise;
+      }
+
+      if (command === "save_library_index") {
+        return Promise.resolve();
+      }
+
+      return Promise.resolve({ libraryRoot: "C:\\Music" });
+    });
+
+    renderStrictApp();
+    await openLibraryWorkspace();
+    await screen.findByText("Cached Song");
+
+    const scanCalls = tauriMocks.invoke.mock.calls.filter(
+      ([command]) => command === "scan_media_library",
+    );
+    expect(scanCalls).toHaveLength(1);
+
+    pendingScan.resolve(populatedScanResult);
+    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
+  });
+
+  it("renders loading state while scanning", async () => {
+    let resolveScan: (value: LibraryScanResult) => void = () => undefined;
+    const pendingScan = new Promise<LibraryScanResult>((resolve) => {
+      resolveScan = resolve;
+    });
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "scan_media_library") {
+        return pendingScan;
+      }
+
+      return Promise.resolve({ libraryRoot: "C:\\Music" });
+    });
+
+    render(<App />);
+    await openLibraryWorkspace();
+
+    expect(await screen.findByText("Scanning for .opus and .ttml pairs...")).toBeInTheDocument();
+    resolveScan(populatedScanResult);
+    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
+  });
+
+  it("exits restoring and scanning after a successful restored-root scan in StrictMode", async () => {
+    const pendingScan = createDeferred<LibraryScanResult>();
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "scan_media_library") {
+        return pendingScan.promise;
+      }
+
+      return Promise.resolve({ libraryRoot: "C:\\Music" });
+    });
+
+    renderStrictApp();
+    await openLibraryWorkspace();
+
+    expect(await screen.findByText("Scanning for .opus and .ttml pairs...")).toBeInTheDocument();
+
+    pendingScan.resolve(populatedScanResult);
+
+    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
+    expect(
+      screen.getByText("Scan complete · 3 folders · 5 files · 2 songs · 1 issues"),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText("Restoring saved library folder...")).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("Scanning for .opus and .ttml pairs...")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rescan" })).toBeEnabled();
+  });
+
+  it("renders songs and diagnostics from a successful scan", async () => {
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace();
+
+    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
+    expect(
+      screen.getByText("Scan complete · 3 folders · 5 files · 2 songs · 1 issues"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("The Beatles")).toBeInTheDocument();
+    expect(screen.getByText("Diagnostics (1)")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("Diagnostics (1)"));
+    expect(screen.getByText("Missing lyrics")).toBeInTheDocument();
+    expect(screen.getByText("Loose\\Missing Lyrics.opus")).toBeInTheDocument();
+  });
+
+  it("loads a Library song into the persistent player and updates metadata", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+
+    await playSongFromLibrary(user, "Hey Jude");
+
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("resolve_audio_source", {
+        song: populatedScanResult.songs[0],
+      }),
+    );
+    expect(screen.getByRole("region", { name: "Current song information" })).toHaveTextContent(
+      "The Beatles - Hey Jude",
+    );
+    expect(screen.getByRole("contentinfo", { name: "Media transport" })).toHaveTextContent(
+      "Hey Jude",
+    );
+    expect(getAudioElement().src).toContain("The%20Beatles%20-%20Hey%20Jude.opus");
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+    expect(screen.getByRole("complementary", { name: "Queue" })).toHaveTextContent(
+      "No songs queued yet.",
+    );
+  });
+
+  it("keeps one audio element mounted while switching workspaces", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    const { container } = render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+    const audio = getAudioElement();
+
+    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: "Library" }));
+
+    expect(container.querySelectorAll("audio")).toHaveLength(1);
+    expect(getAudioElement()).toBe(audio);
+  });
+
+  it("reflects media events for duration, time, seek, volume, pause, and ended", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+    await playSongFromLibrary(user, "Hey Jude");
+
+    const audio = getAudioElement();
+    setAudioNumberProperty(audio, "duration", 125);
+    setAudioNumberProperty(audio, "currentTime", 30);
+    fireEvent.loadedMetadata(audio);
+    fireEvent.timeUpdate(audio);
+
+    expect(screen.getByText("0:30")).toBeInTheDocument();
+    expect(screen.getByText("2:05")).toBeInTheDocument();
+
+    fireEvent.play(audio);
+    await user.click(screen.getByRole("button", { name: "Pause" }));
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
+
+    fireEvent.pause(audio);
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("slider", { name: "Seek" }), { target: { value: "45" } });
+    expect(audio.currentTime).toBe(45);
+
+    fireEvent.change(screen.getByRole("slider", { name: "Volume" }), { target: { value: "35" } });
+    expect(audio.volume).toBe(0.35);
+
+    setAudioNumberProperty(audio, "currentTime", 125);
+    fireEvent.ended(audio);
+    expect(screen.getByText("Ended")).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Queue" })).toHaveTextContent(
+      "No songs queued yet.",
+    );
+  });
+
+  it("handles rejected play promises and allows retry from the transport", async () => {
+    const user = userEvent.setup();
+    vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(new Error("blocked"));
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+
+    await playSongFromLibrary(user, "Hey Jude");
+
+    expect(
+      await screen.findByText("Playback could not start. Press Play to try again."),
+    ).toBeInTheDocument();
+
+    vi.mocked(HTMLMediaElement.prototype.play).mockResolvedValueOnce(undefined);
+    const transport = screen.getByRole("contentinfo", { name: "Media transport" });
+    await user.click(within(transport).getByRole("button", { name: "Play" }));
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows recoverable media errors and can replace the song afterward", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+
+    await playSongFromLibrary(user, "Hey Jude");
+    const audio = getAudioElement();
+    fireEvent.error(audio);
+    expect(screen.getByText("Playback failed.")).toBeInTheDocument();
+
+    const secondSongRow = screen.getByText("Jóga").closest("article");
+    expect(secondSongRow).not.toBeNull();
+    await user.click(within(secondSongRow as HTMLElement).getByRole("button", { name: "Play" }));
+    expect(screen.getByRole("region", { name: "Current song information" })).toHaveTextContent(
+      "Björk - Jóga",
+    );
+  });
+
+  it("shows a zero-file scan state", async () => {
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: emptyScanResult });
+    render(<App />);
+    await openLibraryWorkspace();
+
+    expect(await screen.findByText("No files inspected")).toBeInTheDocument();
+    expect(
+      screen.getByText("The selected folder could not be scanned or contains no files."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Scan complete · 1 folders · 0 files · 0 songs · 0 issues"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a no-supported-media scan state", async () => {
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: noSupportedFilesScanResult });
+    render(<App />);
+    await openLibraryWorkspace();
+
+    expect(await screen.findByText("No supported karaoke files found")).toBeInTheDocument();
+    expect(
+      screen.getByText("The scan did not find any .opus or .ttml files in the selected folder."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an unpaired-candidates scan state with diagnostics", async () => {
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: unpairedCandidatesScanResult });
+    render(<App />);
+    await openLibraryWorkspace();
+
+    expect(await screen.findByText("No valid songs found")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        ".opus and .ttml files must have matching filename stems and be in the same folder. Open diagnostics for details.",
+      ),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByText("Diagnostics (1)"));
+    expect(screen.getByText("Missing lyrics")).toBeInTheDocument();
+  });
+
+  it("searches by artist and title and clears back to all results", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace(user);
+
+    const search = await screen.findByLabelText("Search library");
+    await user.type(search, "beatles");
+    expect(screen.getByText("Hey Jude")).toBeInTheDocument();
+    expect(screen.queryByText("Jóga")).not.toBeInTheDocument();
+
+    await user.clear(search);
+    await user.type(search, "jóga");
+    expect(screen.getByText("Jóga")).toBeInTheDocument();
+    expect(screen.queryByText("Hey Jude")).not.toBeInTheDocument();
+
+    await user.clear(search);
+    expect(screen.getByText("Hey Jude")).toBeInTheDocument();
+    expect(screen.getByText("Jóga")).toBeInTheDocument();
+  });
+
+  it("shows a no-search-results state", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace(user);
+
+    await user.type(await screen.findByLabelText("Search library"), "nothing matches");
+
+    expect(screen.getByText("No search results")).toBeInTheDocument();
+    expect(
+      screen.getByText("Clear the search field to show the complete library."),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps stale successful results visible after a failed rescan", async () => {
+    const user = userEvent.setup();
+    let scanCount = 0;
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "scan_media_library") {
+        scanCount += 1;
+        if (scanCount === 1) {
+          return Promise.resolve(populatedScanResult);
+        }
+
+        return Promise.reject("The selected library folder is not available.");
+      }
+
+      return Promise.resolve({ libraryRoot: "C:\\Music" });
+    });
+    render(<App />);
+    await openLibraryWorkspace(user);
+
+    await screen.findByText("Hey Jude");
+    await user.click(screen.getByRole("button", { name: "Rescan" }));
+
+    expect(
+      await screen.findByText("The selected library folder is not available."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Hey Jude")).toBeInTheDocument();
+  });
+
+  it("prevents duplicate rescan invocations while scanning", async () => {
+    const user = userEvent.setup();
+    let resolveScan: (value: LibraryScanResult) => void = () => undefined;
+    const pendingScan = new Promise<LibraryScanResult>((resolve) => {
+      resolveScan = resolve;
+    });
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "scan_media_library") {
+        return pendingScan;
+      }
+
+      return Promise.resolve({ libraryRoot: "C:\\Music" });
+    });
+    render(<App />);
+    await openLibraryWorkspace(user);
+
+    const rescan = await screen.findByRole("button", { name: "Rescan" });
+    expect(rescan).toBeDisabled();
+    await user.click(rescan);
+    await user.click(rescan);
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "scan_media_library"),
+    ).toHaveLength(1);
+
+    resolveScan(populatedScanResult);
+    await screen.findByText("Hey Jude");
+  });
+
+  it("queues a newly selected folder while a restore scan is still running", async () => {
+    const user = userEvent.setup();
+    let resolveInitialScan: (value: LibraryScanResult) => void = () => undefined;
+    const pendingInitialScan = new Promise<LibraryScanResult>((resolve) => {
+      resolveInitialScan = resolve;
+    });
+    tauriMocks.open.mockResolvedValue("C:\\Music");
+    tauriMocks.invoke.mockImplementation((command: string, args?: { rootPath?: string }) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\OldMusic" });
+      }
+
+      if (command === "save_library_root") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "load_library_index") {
+        return Promise.resolve({ status: "miss", scanResult: null, message: null });
+      }
+
+      if (command === "save_library_index") {
+        return Promise.resolve();
+      }
+
+      if (command === "scan_media_library" && args?.rootPath === "C:\\OldMusic") {
+        return pendingInitialScan;
+      }
+
+      if (command === "scan_media_library" && args?.rootPath === "C:\\Music") {
+        return Promise.resolve(populatedScanResult);
+      }
+
+      return Promise.reject(new Error(`Unexpected command: ${command}`));
+    });
+
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Scanning for .opus and .ttml pairs...");
+    await user.click(screen.getByRole("button", { name: "Change folder" }));
+
+    resolveInitialScan(emptyScanResult);
+
+    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("scan_media_library", {
+      rootPath: "C:\\Music",
+    });
+  });
+
+  it("keeps a queued selected-root scan authoritative when the restore scan settles first", async () => {
+    const user = userEvent.setup();
+    const pendingInitialScan = createDeferred<LibraryScanResult>();
+    const oldRootResult: LibraryScanResult = {
+      ...emptyScanResult,
+      rootPath: "C:\\OldMusic",
+    };
+
+    tauriMocks.open.mockResolvedValue("C:\\Music");
+    tauriMocks.invoke.mockImplementation((command: string, args?: { rootPath?: string }) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\OldMusic" });
+      }
+
+      if (command === "save_library_root") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "load_library_index") {
+        return Promise.resolve({ status: "miss", scanResult: null, message: null });
+      }
+
+      if (command === "save_library_index") {
+        return Promise.resolve();
+      }
+
+      if (command === "scan_media_library" && args?.rootPath === "C:\\OldMusic") {
+        return pendingInitialScan.promise;
+      }
+
+      if (command === "scan_media_library" && args?.rootPath === "C:\\Music") {
+        return Promise.resolve(populatedScanResult);
+      }
+
+      return Promise.reject(new Error(`Unexpected command: ${command}`));
+    });
+
+    renderStrictApp();
+    await openLibraryWorkspace(user);
+    await screen.findByText("Scanning for .opus and .ttml pairs...");
+
+    await user.click(screen.getByRole("button", { name: "Change folder" }));
+    pendingInitialScan.resolve(oldRootResult);
+
+    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
+    expect(screen.getByText(/Selected folder:/)).toHaveTextContent("C:\\Music");
+    expect(screen.queryByText("No files inspected")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Scan complete · 3 folders · 5 files · 2 songs · 1 issues"),
+    ).toBeInTheDocument();
+  });
+
+  it("exits loading state after a restored-root scan failure", async () => {
+    const pendingScan = createDeferred<LibraryScanResult>();
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "scan_media_library") {
+        return pendingScan.promise;
+      }
+
+      return Promise.resolve({ libraryRoot: "C:\\Music" });
+    });
+
+    renderStrictApp();
+    await openLibraryWorkspace();
+    await screen.findByText("Scanning for .opus and .ttml pairs...");
+
+    pendingScan.reject("The selected library folder is not available.");
+
+    expect(
+      await screen.findByText("The selected library folder is not available."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Restoring saved library folder...")).not.toBeInTheDocument();
+    expect(screen.queryByText("Scanning for .opus and .ttml pairs...")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rescan" })).toBeEnabled();
+  });
+
+  it("rebuilds the library index with a guarded fresh scan", async () => {
+    const user = userEvent.setup();
+    let scanCount = 0;
+    const pendingRebuildScan = createDeferred<LibraryScanResult>();
+    const rebuiltResult: LibraryScanResult = {
+      ...populatedScanResult,
+      songs: [
+        ...populatedScanResult.songs,
+        {
+          id: "song-new",
+          title: "New Song",
+          artist: "New Artist",
+          displayName: "New Artist - New Song",
+          directoryPath: "C:\\Music\\New",
+          audioPath: "C:\\Music\\New\\New Artist - New Song.opus",
+          lyricPath: "C:\\Music\\New\\New Artist - New Song.ttml",
+          fileStem: "New Artist - New Song",
+        },
+      ],
+    };
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "load_library_settings") {
+        return Promise.resolve({ libraryRoot: "C:\\Music" });
+      }
+
+      if (command === "load_library_index") {
+        return Promise.resolve({ status: "miss", scanResult: null, message: null });
+      }
+
+      if (command === "scan_media_library") {
+        scanCount += 1;
+        return scanCount === 1 ? Promise.resolve(populatedScanResult) : pendingRebuildScan.promise;
+      }
+
+      if (command === "clear_library_index" || command === "save_library_index") {
+        return Promise.resolve();
+      }
+
+      return Promise.reject(new Error(`Unexpected command: ${command}`));
+    });
+
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+
+    await user.click(screen.getByRole("button", { name: "Rebuild library index" }));
+    expect(screen.getByRole("button", { name: "Rebuild library index" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Rebuild library index" }));
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("clear_library_index", {
+      rootPath: "C:\\Music",
+    });
+    pendingRebuildScan.resolve(rebuiltResult);
+    expect(await screen.findByText("New Song")).toBeInTheDocument();
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "scan_media_library"),
+    ).toHaveLength(2);
+  });
+
+  it("does not show queue actions in Library", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openLibraryWorkspace(user);
+
+    expect(screen.queryByRole("button", { name: /add to queue/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("Singer shell", () => {
+  it("renders and updates the local singer bar", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(screen.getByRole("region", { name: "Singer bar" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Singer 1")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Singer 4")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add singer" }));
+    expect(screen.getByDisplayValue("Singer 5")).toBeInTheDocument();
+
+    const singerTwoInput = screen.getByDisplayValue("Singer 2");
+    await user.clear(singerTwoInput);
+    await user.type(singerTwoInput, "Lead singer");
+    expect(screen.getByDisplayValue("Lead singer")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Remove Singer 1" }));
+    expect(screen.queryByDisplayValue("Singer 1")).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Lead singer")).toBeInTheDocument();
+  });
+});
