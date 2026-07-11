@@ -56,3 +56,31 @@
 - Run `.\scripts\validate.ps1`.
 - Report validation honestly.
 - Do not commit unless explicitly instructed.
+
+## Architecture Workflow
+
+Major architectural changes follow this process:
+
+Design Review
+    ↓
+Draft RFC
+    ↓
+Discussion
+    ↓
+Accepted RFC
+    ↓
+Implementation
+    ↓
+Validation
+    ↓
+Commit
+
+Accepted RFCs are authoritative.
+
+Do not silently redesign accepted architecture.
+
+If implementation conflicts with an Accepted RFC:
+
+1. Stop.
+2. Report the conflict.
+3. Request a Design Review.
