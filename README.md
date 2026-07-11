@@ -80,3 +80,38 @@ npm run tauri:build
 ```
 
 Tauri packaging output is generated under `src-tauri\target\release\bundle` when native prerequisites are installed and the build succeeds.
+
+
+## Architecture Milestone A1
+
+Established the architectural governance foundation for Karaoke Webview.
+
+Introduced an RFC-driven development workflow where major architectural
+decisions are formalised before implementation.
+
+Added:
+- RFC documentation process
+- RFC template
+- Core RFC index
+- RFC-001 Host Authority
+- RFC-002 Domain Model
+- RFC-003 Performance Lifecycle
+- RFC-004 Karaoke Modes
+
+Updated:
+- AGENTS.md to reference the RFC workflow
+- Project documentation to establish architecture ownership
+
+This milestone marks the transition from feature-led development to
+architecture-led development.
+
+Future subsystems are expected to follow:
+
+Design Review
+→ RFC
+→ Implementation
+→ Validation
+→ Commit
+
+Accepted RFCs are now the authoritative source for architectural
+decisions within the repository.

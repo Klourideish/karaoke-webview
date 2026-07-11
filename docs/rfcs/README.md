@@ -170,3 +170,21 @@ For contributors new to the project, the recommended reading order is:
 5. RFC-004 – Karaoke Modes
 
 Additional RFCs build upon this foundation.
+
+---
+
+## Naming Convention
+
+RFC documents use the following filename format:
+
+RFC-<number>-<short-title>.md
+
+Examples:
+
+- RFC-001-host-authority.md
+- RFC-002-domain-model.md
+- RFC-003-performance-lifecycle.md
+
+The RFC number is the authoritative identifier.
+
+The filename is descriptive for readability and repository navigation.
