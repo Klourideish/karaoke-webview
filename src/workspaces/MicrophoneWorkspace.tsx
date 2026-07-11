@@ -6,6 +6,9 @@ export function MicrophoneWorkspace({
   discovery: ReturnType<typeof useLocalMicrophones>;
 }) {
   const isLoading = discovery.status === "loading";
+  const availableSources = discovery.sources.filter(
+    (source) => source.availability === "available",
+  );
 
   return (
     <section className="view-panel microphone-workspace" aria-labelledby="view-heading">
@@ -35,24 +38,24 @@ export function MicrophoneWorkspace({
             {discovery.error}
           </p>
         ) : null}
-        {discovery.status === "success" && discovery.sources.length === 0 ? (
-          <p>No local microphone inputs were found.</p>
+        {discovery.status === "success" && availableSources.length === 0 ? (
+          <p>No available local microphone inputs were found.</p>
         ) : null}
-        {discovery.status === "success" && discovery.sources.length > 0 ? (
+        {discovery.status === "success" && availableSources.length > 0 ? (
           <p>
-            {discovery.sources.length} local microphone input
-            {discovery.sources.length === 1 ? "" : "s"} discovered.
+            {availableSources.length} available local microphone input
+            {availableSources.length === 1 ? "" : "s"} discovered.
           </p>
         ) : null}
       </div>
 
-      {discovery.sources.length > 0 ? (
+      {availableSources.length > 0 ? (
         <ul className="microphone-source-list" aria-label="Discovered microphone inputs">
-          {discovery.sources.map((source) => (
+          {availableSources.map((source) => (
             <li className="microphone-source-row" key={source.id}>
               <div>
                 <h3>{source.displayName}</h3>
-                <p>{source.availability === "available" ? "Available" : "Unavailable"}</p>
+                <p>Available</p>
               </div>
               {source.isDefault ? (
                 <span className="microphone-default-label">Default input</span>

@@ -435,11 +435,13 @@ describe("Microphone workspace", () => {
 
     deferred.resolve([]);
 
-    expect(await screen.findByText("No local microphone inputs were found.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("No available local microphone inputs were found."),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
   });
 
-  it("renders distinct discovered sources and the Windows default input", async () => {
+  it("renders available sources, hides unavailable sources, and keeps the default visible", async () => {
     tauriMocks.invoke.mockImplementation((command: string) => {
       if (command === "discover_local_microphone_sources") {
         return Promise.resolve(discoveredMicrophones);
@@ -451,11 +453,31 @@ describe("Microphone workspace", () => {
 
     await openMicrophoneWorkspace(user);
 
-    expect(await screen.findByText("2 local microphone inputs discovered.")).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { name: "USB Microphone" })).toHaveLength(2);
+    expect(
+      await screen.findByText("1 available local microphone input discovered."),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "USB Microphone" })).toHaveLength(1);
     expect(screen.getByText("Default input")).toBeInTheDocument();
     expect(screen.getByText("Available")).toBeInTheDocument();
-    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
+  });
+
+  it("shows an available-source empty state when the registry contains only unavailable inputs", async () => {
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "discover_local_microphone_sources") {
+        return Promise.resolve([discoveredMicrophones[1]]);
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+
+    expect(
+      await screen.findByText("No available local microphone inputs were found."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "USB Microphone" })).not.toBeInTheDocument();
   });
 
   it("shows a recoverable discovery failure", async () => {
@@ -490,10 +512,12 @@ describe("Microphone workspace", () => {
     render(<App />);
 
     await openMicrophoneWorkspace(user);
-    await screen.findByText("No local microphone inputs were found.");
+    await screen.findByText("No available local microphone inputs were found.");
     await user.click(screen.getByRole("button", { name: "Refresh" }));
 
-    expect(await screen.findByText("2 local microphone inputs discovered.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("1 available local microphone input discovered."),
+    ).toBeInTheDocument();
     expect(discoveryCount).toBe(2);
     expect(
       screen.queryByRole("button", { name: /capture|assign|mute|gain/i }),
@@ -523,7 +547,9 @@ describe("Microphone workspace", () => {
       await Promise.resolve();
     });
     fireEvent.click(screen.getByRole("button", { name: "Microphones" }));
-    expect(screen.getByText("No local microphone inputs were found.")).toBeInTheDocument();
+    expect(
+      screen.getByText("No available local microphone inputs were found."),
+    ).toBeInTheDocument();
 
     await act(async () => {
       vi.advanceTimersByTime(LOCAL_MICROPHONE_REFRESH_INTERVAL_MS);
@@ -532,8 +558,8 @@ describe("Microphone workspace", () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText("2 local microphone inputs discovered.")).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { name: "USB Microphone" })).toHaveLength(2);
+    expect(screen.getByText("1 available local microphone input discovered.")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "USB Microphone" })).toHaveLength(1);
   });
 });
 
