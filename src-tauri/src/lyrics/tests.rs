@@ -70,6 +70,67 @@ fn parses_nested_timed_spans() {
 }
 
 #[test]
+fn preserves_timed_fragment_text_and_spacing() {
+    let document = parse_ttml(
+        "song-a",
+        &fixture(
+            r#"<p begin="1s" end="3s"><span begin="1s" end="1.5s">Time </span><span begin="1.5s" end="2s">to </span><span begin="2s" end="2.5s">cele</span><span begin="2.5s" end="3s">brate</span></p>"#,
+        ),
+    )
+    .unwrap();
+
+    let segments = &document.lines[0].segments;
+    assert_eq!(document.lines[0].text, "Time to celebrate");
+    assert_eq!(segments[0].text, "Time ");
+    assert_eq!(segments[1].text, "to ");
+    assert_eq!(segments[2].text, "cele");
+    assert_eq!(segments[3].text, "brate");
+}
+
+#[test]
+fn nested_timed_wrapper_with_timed_children_uses_leaf_fragments() {
+    let document = parse_ttml(
+        "song-a",
+        &fixture(
+            r#"<p begin="1s" end="2s"><span begin="1s" end="2s"><span begin="1s" end="1.25s">La-</span><span begin="1.25s" end="1.5s">la-</span><span begin="1.5s" end="2s">la</span></span></p>"#,
+        ),
+    )
+    .unwrap();
+
+    let segments = &document.lines[0].segments;
+    assert_eq!(document.lines[0].text, "La-la-la");
+    assert_eq!(segments.len(), 3);
+    assert_eq!(segments[0].text, "La-");
+    assert_eq!(segments[1].text, "la-");
+    assert_eq!(segments[2].text, "la");
+}
+
+#[test]
+fn direct_text_around_nested_spans_preserves_order() {
+    let document = parse_ttml(
+        "song-a",
+        &fixture(
+            r#"<p begin="1s" end="3s"><span begin="1s" end="3s">Say <span begin="1.5s" end="2s">안녕</span> now.</span></p>"#,
+        ),
+    )
+    .unwrap();
+
+    let segments = &document.lines[0].segments;
+    assert_eq!(document.lines[0].text, "Say 안녕 now.");
+    assert_eq!(
+        segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>(),
+        ["Say ", "안녕", " now."]
+    );
+    assert!(document
+        .warnings
+        .iter()
+        .any(|warning| warning.code == "mixed-timed-wrapper-text"));
+}
+
+#[test]
 fn preserves_unicode_and_decodes_entities() {
     let document = parse_ttml(
         "song-a",

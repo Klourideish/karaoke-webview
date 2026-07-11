@@ -94,7 +94,15 @@ fn parse_line(
         return None;
     }
 
-    let text = normalize_text(&collect_visible_text(node));
+    let mut segments = parse_segments(source_song_id, node, index, begin, end, warnings);
+    let text = if segments.is_empty() {
+        normalize_text(&collect_visible_text(node))
+    } else {
+        segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<String>()
+    };
     if text.is_empty() {
         warnings.push(warning(
             "empty-line",
@@ -107,7 +115,6 @@ fn parse_line(
     let role = nearest_div_role(node);
     let region = attribute_local(node, "region").map(str::to_string);
     let style_refs = style_refs(node);
-    let mut segments = parse_segments(source_song_id, node, index, begin, end, warnings);
     if segments.is_empty() {
         segments.push(LyricSegment {
             id: stable_id(&format!(
@@ -144,57 +151,205 @@ fn parse_segments(
     warnings: &mut Vec<LyricWarning>,
 ) -> Vec<LyricSegment> {
     let mut segments = Vec::new();
-    for span in line
-        .descendants()
-        .filter(|node| node.is_element() && node.tag_name().name() == "span")
-    {
-        let text = normalize_text(&collect_visible_text(span));
-        if text.is_empty() {
+    for child in line.children() {
+        if child.is_text() {
+            if let Some(value) = child.text() {
+                if !value.trim().is_empty() {
+                    let text = normalize_source_text_node(value);
+                    push_segment(
+                        &mut segments,
+                        source_song_id,
+                        line_index,
+                        text,
+                        line_begin,
+                        line_begin,
+                        Vec::new(),
+                    );
+                }
+            }
             continue;
         }
 
-        let context = node_context(span);
-        let begin = parse_optional_time(span, "begin", warnings, &context).unwrap_or(line_begin);
-        let end = match resolve_end(span, begin, Some(line_end), warnings, &context) {
-            Some(end) => end,
-            None => line_end,
-        };
-        if end < begin {
-            warnings.push(warning(
-                "invalid-segment-timing",
-                "A lyric segment ends before it begins.",
-                Some(context),
-            ));
-            continue;
+        if child.is_element() && child.tag_name().name() == "span" {
+            parse_span_segment(
+                source_song_id,
+                line_index,
+                line_begin,
+                line_end,
+                warnings,
+                &mut segments,
+                child,
+            );
         }
-
-        let clipped_begin = begin.max(line_begin);
-        let clipped_end = end.min(line_end);
-        if clipped_begin != begin || clipped_end != end {
-            warnings.push(warning(
-                "segment-outside-line",
-                "A lyric segment timing was outside its parent line and was clamped.",
-                Some(context),
-            ));
-        }
-
-        segments.push(LyricSegment {
-            id: stable_id(&format!(
-                "{source_song_id}|line:{line_index}|segment:{}|{}|{}|{}",
-                segments.len(),
-                clipped_begin,
-                clipped_end,
-                text
-            )),
-            text,
-            begin_ms: clipped_begin,
-            end_ms: clipped_end,
-            timing_granularity: LyricTimingGranularity::Text,
-            style_refs: style_refs(span),
-        });
     }
 
     segments
+}
+
+fn parse_span_segment(
+    source_song_id: &str,
+    line_index: usize,
+    line_begin: u64,
+    line_end: u64,
+    warnings: &mut Vec<LyricWarning>,
+    segments: &mut Vec<LyricSegment>,
+    span: Node<'_, '_>,
+) {
+    let context = node_context(span);
+    let has_explicit_timing = attribute_local(span, "begin").is_some()
+        || attribute_local(span, "end").is_some()
+        || attribute_local(span, "dur").is_some();
+    let begin = parse_optional_time(span, "begin", warnings, &context).unwrap_or(line_begin);
+    let end = if has_explicit_timing {
+        match resolve_end(span, begin, Some(line_end), warnings, &context) {
+            Some(end) => end,
+            None => line_end,
+        }
+    } else {
+        line_begin
+    };
+    let Some((clipped_begin, clipped_end)) =
+        clip_segment_timing(begin, end, line_begin, line_end, context.clone(), warnings)
+    else {
+        return;
+    };
+
+    let has_child_spans = span
+        .children()
+        .any(|child| child.is_element() && child.tag_name().name() == "span");
+    if has_child_spans {
+        parse_span_children(
+            source_song_id,
+            line_index,
+            clipped_begin,
+            clipped_end,
+            warnings,
+            segments,
+            span,
+            has_explicit_timing,
+        );
+        return;
+    }
+
+    let text = collect_fragment_text(span);
+    if text.trim().is_empty() {
+        return;
+    }
+
+    push_segment(
+        segments,
+        source_song_id,
+        line_index,
+        text,
+        clipped_begin,
+        clipped_end,
+        style_refs(span),
+    );
+}
+
+fn parse_span_children(
+    source_song_id: &str,
+    line_index: usize,
+    parent_begin: u64,
+    parent_end: u64,
+    warnings: &mut Vec<LyricWarning>,
+    segments: &mut Vec<LyricSegment>,
+    span: Node<'_, '_>,
+    parent_has_explicit_timing: bool,
+) {
+    for child in span.children() {
+        if child.is_text() {
+            if let Some(value) = child.text() {
+                if value.trim().is_empty() {
+                    continue;
+                }
+                if parent_has_explicit_timing {
+                    warnings.push(warning(
+                        "mixed-timed-wrapper-text",
+                        "A timed lyric wrapper contains direct text around timed fragments.",
+                        Some(node_context(span)),
+                    ));
+                }
+                push_segment(
+                    segments,
+                    source_song_id,
+                    line_index,
+                    normalize_source_text_node(value),
+                    parent_begin,
+                    parent_end,
+                    style_refs(span),
+                );
+            }
+            continue;
+        }
+
+        if child.is_element() && child.tag_name().name() == "span" {
+            parse_span_segment(
+                source_song_id,
+                line_index,
+                parent_begin,
+                parent_end,
+                warnings,
+                segments,
+                child,
+            );
+        }
+    }
+}
+
+fn clip_segment_timing(
+    begin: u64,
+    end: u64,
+    line_begin: u64,
+    line_end: u64,
+    context: String,
+    warnings: &mut Vec<LyricWarning>,
+) -> Option<(u64, u64)> {
+    if end < begin {
+        warnings.push(warning(
+            "invalid-segment-timing",
+            "A lyric segment ends before it begins.",
+            Some(context),
+        ));
+        return None;
+    }
+
+    let clipped_begin = begin.max(line_begin);
+    let clipped_end = end.min(line_end);
+    if clipped_begin != begin || clipped_end != end {
+        warnings.push(warning(
+            "segment-outside-line",
+            "A lyric segment timing was outside its parent line and was clamped.",
+            Some(context),
+        ));
+    }
+
+    Some((clipped_begin, clipped_end))
+}
+
+fn push_segment(
+    segments: &mut Vec<LyricSegment>,
+    source_song_id: &str,
+    line_index: usize,
+    text: String,
+    begin_ms: u64,
+    end_ms: u64,
+    style_refs: Vec<String>,
+) {
+    segments.push(LyricSegment {
+        id: stable_id(&format!(
+            "{source_song_id}|line:{line_index}|segment:{}|{}|{}|{}",
+            segments.len(),
+            begin_ms,
+            end_ms,
+            text
+        )),
+        text,
+        begin_ms,
+        end_ms,
+        timing_granularity: LyricTimingGranularity::Text,
+        style_refs,
+    });
 }
 
 fn parse_optional_time(
@@ -264,6 +419,24 @@ fn collect_visible_text(node: Node<'_, '_>) -> String {
 
 fn normalize_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<&str>>().join(" ")
+}
+
+fn normalize_source_text_node(text: &str) -> String {
+    if text.contains('\n') || text.contains('\r') {
+        normalize_text(text)
+    } else {
+        text.to_string()
+    }
+}
+
+fn collect_fragment_text(node: Node<'_, '_>) -> String {
+    let mut text = String::new();
+    for descendant in node.descendants().filter(|descendant| descendant.is_text()) {
+        if let Some(value) = descendant.text() {
+            text.push_str(value);
+        }
+    }
+    text
 }
 
 fn nearest_div_role(node: Node<'_, '_>) -> Option<String> {

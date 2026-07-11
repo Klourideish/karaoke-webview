@@ -5,6 +5,9 @@ export type ActiveLyricState = {
   currentLine: LyricLine | null;
   nextLine: LyricLine | null;
   activeFragments: LyricSegment[];
+  activeFragmentIds: string[];
+  activeFragmentIndex: number | null;
+  currentFragmentProgress: number;
   currentLineProgress: number;
   timelineState:
     "before-first-line" | "active" | "short-gap" | "instrumental-gap" | "after-last-line";
@@ -33,21 +36,69 @@ export class LyricTimingEngine {
     const nextIndex = this.findNextLineIndex(timeMs, currentIndex);
     const activeLine = currentIndex >= 0 ? this.lines[currentIndex] : null;
     const timelineState = this.timelineState(timeMs, currentIndex, previousIndex, nextIndex);
-    const currentLine =
-      timelineState === "short-gap" && previousIndex >= 0 ? this.lines[previousIndex] : activeLine;
+    const displayCurrentIndex = this.findDisplayCurrentIndex(
+      currentIndex,
+      nextIndex,
+      timelineState,
+    );
+    const displayNextIndex = this.findDisplayNextIndex(
+      displayCurrentIndex,
+      currentIndex,
+      nextIndex,
+    );
+    const currentLine = displayCurrentIndex >= 0 ? this.lines[displayCurrentIndex] : null;
+    const activeFragments = activeLine ? activeSegments(activeLine, timeMs) : [];
+    const activeFragmentIndex =
+      activeLine && activeFragments.length > 0
+        ? activeLine.segments.findIndex((segment) => segment.id === activeFragments[0].id)
+        : null;
 
     return {
       previousLine: previousIndex >= 0 ? this.lines[previousIndex] : null,
       currentLine,
-      nextLine: nextIndex >= 0 ? this.lines[nextIndex] : null,
-      activeFragments: activeLine ? activeSegments(activeLine, timeMs) : [],
-      currentLineProgress: activeLine
-        ? lineProgress(activeLine, timeMs)
-        : timelineState === "short-gap"
-          ? 1
-          : 0,
+      nextLine: displayNextIndex >= 0 ? this.lines[displayNextIndex] : null,
+      activeFragments,
+      activeFragmentIds: activeFragments.map((fragment) => fragment.id),
+      activeFragmentIndex:
+        activeFragmentIndex !== null && activeFragmentIndex >= 0 ? activeFragmentIndex : null,
+      currentFragmentProgress: activeFragments[0]
+        ? fragmentProgress(activeFragments[0], timeMs)
+        : 0,
+      currentLineProgress: activeLine ? lineProgress(activeLine, timeMs) : 0,
       timelineState,
     };
+  }
+
+  private findDisplayCurrentIndex(
+    currentIndex: number,
+    nextIndex: number,
+    timelineState: ActiveLyricState["timelineState"],
+  ) {
+    if (currentIndex >= 0) {
+      return currentIndex;
+    }
+
+    if (timelineState === "before-first-line" || timelineState === "short-gap") {
+      return nextIndex;
+    }
+
+    return -1;
+  }
+
+  private findDisplayNextIndex(
+    displayCurrentIndex: number,
+    currentIndex: number,
+    nextIndex: number,
+  ) {
+    if (displayCurrentIndex >= 0) {
+      return this.findFollowingLineIndex(displayCurrentIndex);
+    }
+
+    if (currentIndex >= 0) {
+      return nextIndex;
+    }
+
+    return nextIndex;
   }
 
   private timelineState(
@@ -149,10 +200,16 @@ export class LyricTimingEngine {
     }
     return -1;
   }
+
+  private findFollowingLineIndex(index: number) {
+    return index + 1 < this.lines.length ? index + 1 : -1;
+  }
 }
 
 function activeSegments(line: LyricLine, timeMs: number) {
-  return line.segments.filter((segment) => containsTime(segment, timeMs));
+  return line.segments.filter((segment) => {
+    return containsTime(segment, timeMs) && !usesOnlyLineTiming(line, segment);
+  });
 }
 
 function lineProgress(line: LyricLine, timeMs: number) {
@@ -164,8 +221,27 @@ function lineProgress(line: LyricLine, timeMs: number) {
   return Math.min(1, Math.max(0, (timeMs - line.beginMs) / duration));
 }
 
+function fragmentProgress(segment: LyricSegment, timeMs: number) {
+  const duration = segment.endMs - segment.beginMs;
+  if (duration <= 0) {
+    return 0;
+  }
+
+  return Math.min(1, Math.max(0, (timeMs - segment.beginMs) / duration));
+}
+
 function containsTime(range: { beginMs: number; endMs: number }, timeMs: number) {
   return timeMs >= range.beginMs && timeMs < range.endMs;
+}
+
+function usesOnlyLineTiming(line: LyricLine, segment: LyricSegment) {
+  return (
+    segment.beginMs === line.beginMs &&
+    segment.endMs === line.endMs &&
+    line.segments.every(
+      (candidate) => candidate.beginMs === line.beginMs && candidate.endMs === line.endMs,
+    )
+  );
 }
 
 function finiteTime(timeMs: number) {

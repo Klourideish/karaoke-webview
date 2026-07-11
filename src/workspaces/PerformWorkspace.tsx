@@ -1,7 +1,8 @@
-import { useMemo } from "react";
 import type { AudioPlayer } from "../audioPlayer";
-import { LyricTimingEngine } from "../lyricTiming";
+import type { ActiveLyricState } from "../lyricTiming";
+import type { LyricLine, LyricSegment } from "../lyrics";
 import { playbackStatusLabel } from "../player/playbackFormatting";
+import { useLyricPlaybackClock } from "../useLyricPlaybackClock";
 import type { SongLyricsState } from "../useSongLyrics";
 
 export function PerformWorkspace({
@@ -16,10 +17,12 @@ export function PerformWorkspace({
   description: string;
 }) {
   const currentSong = audioPlayer.currentSong;
-  const timingEngine = useMemo(() => {
-    return lyrics.document ? new LyricTimingEngine(lyrics.document) : null;
-  }, [lyrics.document]);
-  const lyricState = timingEngine?.lookup(audioPlayer.currentTime * 1_000) ?? null;
+  const lyricSnapshot = useLyricPlaybackClock({
+    audioPlayer,
+    document: lyrics.document,
+  });
+  const currentTimeMs = lyricSnapshot?.sampledTimeMs ?? audioPlayer.currentTime * 1_000;
+  const lyricState = lyricSnapshot?.state ?? null;
 
   return (
     <section className="perform-view">
@@ -50,10 +53,12 @@ export function PerformWorkspace({
                   {lyricState.timelineState === "instrumental-gap" ? (
                     <span aria-label="Instrumental section">Instrumental</span>
                   ) : (
-                    (lyricState.currentLine?.text ?? "")
+                    <CurrentLyricLine lyricState={lyricState} currentTimeMs={currentTimeMs} />
                   )}
                 </p>
-                <p className="lyric-line lyric-line-secondary">{lyricState.nextLine?.text ?? ""}</p>
+                <p className="lyric-line lyric-line-secondary">
+                  {lyricState.nextLine ? lineText(lyricState.nextLine) : ""}
+                </p>
               </div>
             ) : null}
           </div>
@@ -63,4 +68,61 @@ export function PerformWorkspace({
       </section>
     </section>
   );
+}
+
+function CurrentLyricLine({
+  currentTimeMs,
+  lyricState,
+}: {
+  currentTimeMs: number;
+  lyricState: ActiveLyricState;
+}) {
+  const currentLine = lyricState.currentLine;
+  if (!currentLine) {
+    return null;
+  }
+
+  if (currentLine.segments.length === 0) {
+    return <>{currentLine.text}</>;
+  }
+
+  return (
+    <span className="lyric-fragment-line" aria-label={lineText(currentLine)}>
+      {currentLine.segments.map((segment) => {
+        const fragmentState = fragmentDisplayState(segment, lyricState, currentTimeMs);
+        return (
+          <span
+            className={`lyric-fragment lyric-fragment-${fragmentState}`}
+            data-fragment-id={segment.id}
+            data-fragment-state={fragmentState}
+            key={segment.id}
+          >
+            {segment.text}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function fragmentDisplayState(
+  segment: LyricSegment,
+  lyricState: ActiveLyricState,
+  currentTimeMs: number,
+) {
+  if (lyricState.activeFragmentIds.includes(segment.id)) {
+    return "active";
+  }
+
+  if (currentTimeMs >= segment.endMs || lyricState.currentLineProgress >= 1) {
+    return "past";
+  }
+
+  return "upcoming";
+}
+
+function lineText(line: LyricLine) {
+  return line.segments.length > 0
+    ? line.segments.map((segment) => segment.text).join("")
+    : line.text;
 }

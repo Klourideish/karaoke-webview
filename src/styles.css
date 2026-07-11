@@ -575,6 +575,7 @@ h3 {
   line-height: 1.3;
   text-align: center;
   user-select: text;
+  white-space: pre-wrap;
 }
 
 .lyric-line-current {
@@ -586,6 +587,31 @@ h3 {
 .lyric-line-secondary {
   min-height: 1.6em;
   font-size: clamp(1.15rem, 0.96rem + 0.45vw, 1.8rem);
+}
+
+.lyric-fragment-line,
+.lyric-fragment {
+  white-space: pre-wrap;
+}
+
+.lyric-fragment {
+  border-bottom: 0.08em solid transparent;
+}
+
+.lyric-fragment-past {
+  color: var(--text);
+  opacity: 0.7;
+}
+
+.lyric-fragment-active {
+  border-bottom-color: var(--accent-strong);
+  color: var(--text);
+  font-weight: 900;
+}
+
+.lyric-fragment-upcoming {
+  color: var(--muted);
+  opacity: 0.82;
 }
 
 .queue-panel {

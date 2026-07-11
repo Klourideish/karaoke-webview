@@ -16,6 +16,7 @@ export type AudioPlayer = {
   currentTime: number;
   duration: number;
   error: string | null;
+  getCurrentTime: () => number;
   loadSong: (song: MediaSong) => Promise<void>;
   pause: () => void;
   play: () => Promise<void>;
@@ -48,6 +49,10 @@ export function useAudioPlayer(): AudioPlayer {
       audioRef.current.volume = clampedVolume;
     }
   }, []);
+
+  const getCurrentTime = useCallback(() => {
+    return finiteMediaTime(audioRef.current?.currentTime ?? currentTime);
+  }, [currentTime]);
 
   const play = useCallback(async () => {
     const audio = audioRef.current;
@@ -210,6 +215,7 @@ export function useAudioPlayer(): AudioPlayer {
     currentTime,
     duration,
     error,
+    getCurrentTime,
     loadSong,
     pause,
     play,

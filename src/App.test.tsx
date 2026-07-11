@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -10,6 +10,9 @@ const tauriMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   open: vi.fn(),
 }));
+
+let nextAnimationFrameId = 1;
+let animationFrameCallbacks = new Map<number, FrameRequestCallback>();
 
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (filePath: string) => `asset://localhost/${encodeURIComponent(filePath)}`,
@@ -257,6 +260,17 @@ beforeEach(() => {
   tauriMocks.invoke.mockReset();
   tauriMocks.open.mockReset();
   tauriMocks.open.mockResolvedValue(null);
+  nextAnimationFrameId = 1;
+  animationFrameCallbacks = new Map<number, FrameRequestCallback>();
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    const id = nextAnimationFrameId;
+    nextAnimationFrameId += 1;
+    animationFrameCallbacks.set(id, callback);
+    return id;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+    animationFrameCallbacks.delete(id);
+  });
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
@@ -300,6 +314,14 @@ function setAudioNumberProperty(
     configurable: true,
     value,
     writable: true,
+  });
+}
+
+function runAnimationFrame(time = 0) {
+  const callbacks = Array.from(animationFrameCallbacks.values());
+  animationFrameCallbacks.clear();
+  act(() => {
+    callbacks.forEach((callback) => callback(time));
   });
 }
 
@@ -866,10 +888,261 @@ describe("Library workspace", () => {
     expect(screen.getByText("Seemed so far away")).toBeInTheDocument();
   });
 
+  it("renders current lyric fragments in source order with static fragment states", async () => {
+    const user = userEvent.setup();
+    const fragmentLyricDocument: LyricDocument = {
+      ...populatedLyricDocument,
+      lines: [
+        {
+          id: "line-fragments",
+          beginMs: 1_000,
+          endMs: 3_000,
+          text: "Time to celebrate",
+          role: null,
+          region: null,
+          styleRefs: [],
+          segments: [
+            {
+              id: "fragment-time",
+              beginMs: 1_000,
+              endMs: 1_500,
+              text: "Time ",
+              timingGranularity: "text",
+              styleRefs: [],
+            },
+            {
+              id: "fragment-to",
+              beginMs: 1_500,
+              endMs: 2_000,
+              text: "to ",
+              timingGranularity: "text",
+              styleRefs: [],
+            },
+            {
+              id: "fragment-cele",
+              beginMs: 2_000,
+              endMs: 2_500,
+              text: "cele",
+              timingGranularity: "text",
+              styleRefs: [],
+            },
+            {
+              id: "fragment-brate",
+              beginMs: 2_500,
+              endMs: 3_000,
+              text: "brate",
+              timingGranularity: "text",
+              styleRefs: [],
+            },
+          ],
+        },
+        {
+          id: "line-korean",
+          beginMs: 4_000,
+          endMs: 5_000,
+          text: "다음 줄",
+          role: null,
+          region: null,
+          styleRefs: [],
+          segments: [
+            {
+              id: "fragment-korean",
+              beginMs: 4_000,
+              endMs: 5_000,
+              text: "다음 줄",
+              timingGranularity: "text",
+              styleRefs: [],
+            },
+          ],
+        },
+      ],
+    };
+    mockInvokeWith({
+      loadRoot: "C:\\Music",
+      scanResult: populatedScanResult,
+      lyricResult: fragmentLyricDocument,
+    });
+    const { container } = render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+    await playSongFromLibrary(user, "Hey Jude");
+    await user.click(screen.getByRole("button", { name: "Perform" }));
+
+    const audio = getAudioElement();
+    setAudioNumberProperty(audio, "currentTime", 2.1);
+    fireEvent.timeUpdate(audio);
+
+    await waitFor(() => {
+      expect(container.querySelector(".lyric-line-current")?.textContent).toBe("Time to celebrate");
+    });
+    const fragments = Array.from(container.querySelectorAll(".lyric-fragment"));
+    expect(fragments).toHaveLength(4);
+    expect(fragments.map((fragment) => fragment.textContent)).toEqual([
+      "Time ",
+      "to ",
+      "cele",
+      "brate",
+    ]);
+    expect(fragments.map((fragment) => fragment.getAttribute("data-fragment-state"))).toEqual([
+      "past",
+      "past",
+      "active",
+      "upcoming",
+    ]);
+    expect(container.querySelector(".lyric-line-secondary")?.textContent).toBe("다음 줄");
+    expect(
+      container.querySelector(".lyric-line-secondary .lyric-fragment"),
+    ).not.toBeInTheDocument();
+
+    setAudioNumberProperty(audio, "currentTime", 4.2);
+    fireEvent.timeUpdate(audio);
+    expect(await screen.findByText("다음 줄")).toBeInTheDocument();
+    expect(screen.queryByText("Time to celebrate")).not.toBeInTheDocument();
+  });
+
+  it("keeps line-level-only lyrics visible without marking a timed fragment active", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({
+      loadRoot: "C:\\Music",
+      scanResult: populatedScanResult,
+      lyricResult: {
+        ...populatedLyricDocument,
+        lines: [
+          {
+            id: "line-only",
+            beginMs: 1_000,
+            endMs: 2_000,
+            text: "Whole line lyric",
+            role: null,
+            region: null,
+            styleRefs: [],
+            segments: [
+              {
+                id: "line-only-segment",
+                beginMs: 1_000,
+                endMs: 2_000,
+                text: "Whole line lyric",
+                timingGranularity: "text",
+                styleRefs: [],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const { container } = render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+    await playSongFromLibrary(user, "Hey Jude");
+    await user.click(screen.getByRole("button", { name: "Perform" }));
+
+    const audio = getAudioElement();
+    setAudioNumberProperty(audio, "currentTime", 1.2);
+    fireEvent.timeUpdate(audio);
+
+    expect(await screen.findByText("Whole line lyric")).toBeInTheDocument();
+    expect(container.querySelector(".lyric-fragment-active")).not.toBeInTheDocument();
+  });
+
+  it("updates rapid lyric fragments from animation frames between sparse timeupdate events", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({
+      loadRoot: "C:\\Music",
+      scanResult: populatedScanResult,
+      lyricResult: {
+        ...populatedLyricDocument,
+        lines: [
+          {
+            id: "rapid-line",
+            beginMs: 1_000,
+            endMs: 1_240,
+            text: "lalala",
+            role: null,
+            region: null,
+            styleRefs: [],
+            segments: [
+              {
+                id: "rapid-a",
+                beginMs: 1_000,
+                endMs: 1_040,
+                text: "la",
+                timingGranularity: "text",
+                styleRefs: [],
+              },
+              {
+                id: "rapid-b",
+                beginMs: 1_040,
+                endMs: 1_120,
+                text: "la",
+                timingGranularity: "text",
+                styleRefs: [],
+              },
+              {
+                id: "rapid-c",
+                beginMs: 1_120,
+                endMs: 1_240,
+                text: "la",
+                timingGranularity: "text",
+                styleRefs: [],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const { container, unmount } = render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByText("Hey Jude");
+    await playSongFromLibrary(user, "Hey Jude");
+    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await waitFor(() =>
+      expect(container.querySelector(".lyric-line-current")?.textContent).toBe("lalala"),
+    );
+
+    const audio = getAudioElement();
+    fireEvent.play(audio);
+
+    setAudioNumberProperty(audio, "currentTime", 1.02);
+    runAnimationFrame();
+    await waitFor(() =>
+      expect(container.querySelector('[data-fragment-id="rapid-a"]')).toHaveAttribute(
+        "data-fragment-state",
+        "active",
+      ),
+    );
+
+    setAudioNumberProperty(audio, "currentTime", 1.08);
+    runAnimationFrame();
+    expect(container.querySelector('[data-fragment-id="rapid-b"]')).toHaveAttribute(
+      "data-fragment-state",
+      "active",
+    );
+
+    fireEvent.pause(audio);
+    const queuedFrameCount = animationFrameCallbacks.size;
+    setAudioNumberProperty(audio, "currentTime", 1.16);
+    runAnimationFrame();
+    expect(container.querySelector('[data-fragment-id="rapid-c"]')).not.toHaveAttribute(
+      "data-fragment-state",
+      "active",
+    );
+    expect(animationFrameCallbacks.size).toBeLessThanOrEqual(queuedFrameCount);
+
+    fireEvent.play(audio);
+    runAnimationFrame();
+    expect(container.querySelector('[data-fragment-id="rapid-c"]')).toHaveAttribute(
+      "data-fragment-state",
+      "active",
+    );
+
+    unmount();
+    expect(animationFrameCallbacks.size).toBe(0);
+  });
+
   it("keeps brief lyric gaps stable and responds to rapid seeks", async () => {
     const user = userEvent.setup();
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
-    render(<App />);
+    const { container } = render(<App />);
     await openLibraryWorkspace(user);
     await screen.findByText("Hey Jude");
     await playSongFromLibrary(user, "Hey Jude");
@@ -880,8 +1153,12 @@ describe("Library workspace", () => {
     setAudioNumberProperty(audio, "currentTime", 3);
     fireEvent.timeUpdate(audio);
     expect(screen.queryByLabelText("Instrumental section")).not.toBeInTheDocument();
-    expect(screen.getByText("Yesterday all my troubles")).toBeInTheDocument();
     expect(screen.getByText("Seemed so far away")).toBeInTheDocument();
+    expect(screen.queryByText("Yesterday all my troubles")).not.toBeInTheDocument();
+    expect(container.querySelector(".lyric-fragment")).toHaveAttribute(
+      "data-fragment-state",
+      "upcoming",
+    );
 
     setAudioNumberProperty(audio, "currentTime", 4.2);
     fireEvent.timeUpdate(audio);

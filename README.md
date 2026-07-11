@@ -53,7 +53,9 @@ The app owns one persistent audio element at the shell level. The bottom transpo
 
 The Rust lyrics subsystem parses discovered `.ttml` files into a renderer-neutral timed lyric document. Parsed timing uses absolute milliseconds and supports the current foundation subset: `<tt>`, `<body>`, `<div>`, timed `<p>` lines, nested `<span>` text segments, `begin`, `end`, `dur`, clock times such as `00:01:02.345`, and offset times such as `2.5s` or `2500ms`.
 
-The parser decodes XML entities, preserves Unicode text, reports recoverable warnings for imperfect timing, and rejects malformed or unsafe inputs. Lyrics are not rendered yet, parsed lyrics are not cached yet, and future visual effects will consume the normalized timing data rather than changing parser output.
+The parser decodes XML entities, preserves Unicode text, reports recoverable warnings for imperfect timing, and rejects malformed or unsafe inputs. The Perform workspace renders a basic synchronized current/next lyric view from the persistent audio clock.
+
+Timed TTML spans are treated as renderer-neutral fragments. A fragment may be a word, syllable, punctuation mark, or sung text piece; the renderer preserves source fragment order and spacing, then applies static past, active, and upcoming states to the current line. Animated effects, romanization, and parsed-lyrics caching are not implemented yet, and future visual effects will consume the normalized timing data rather than changing parser output.
 
 ## Validation
 
