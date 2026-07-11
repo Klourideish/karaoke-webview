@@ -59,11 +59,15 @@ export type ClientDevice = {
   lastSeenAt: string | null;
 };
 
+export type MicrophoneSourceAvailability = "available" | "unavailable";
+
 export type MicrophoneSource =
   | {
       id: MicrophoneSourceId;
       kind: "windows-device";
-      deviceKey: string;
+      displayName: string;
+      availability: MicrophoneSourceAvailability;
+      isDefault: boolean;
     }
   | {
       id: MicrophoneSourceId;

@@ -3,6 +3,7 @@ import { useMediaLibrary } from "../media-library/useMediaLibrary";
 import { BottomMediaBar } from "../player/BottomMediaBar";
 import { useSongLyrics } from "../useSongLyrics";
 import { LibraryWorkspace } from "../workspaces/LibraryWorkspace";
+import { MicrophoneWorkspace } from "../workspaces/MicrophoneWorkspace";
 import { PerformWorkspace } from "../workspaces/PerformWorkspace";
 import { PlaceholderWorkspace } from "../workspaces/PlaceholderWorkspace";
 import { QueuePanel } from "./QueuePanel";
@@ -89,6 +90,10 @@ function MainContent({
 
   if (view.id === "library") {
     return <LibraryWorkspace audioPlayer={audioPlayer} mediaLibrary={mediaLibrary} />;
+  }
+
+  if (view.id === "mic") {
+    return <MicrophoneWorkspace />;
   }
 
   return <PlaceholderWorkspace view={view} />;

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { LyricDocument } from "./lyrics";
 import type { LibraryScanResult, MediaSong } from "./media-library/types";
+import type { LocalMicrophoneSource } from "./microphones/types";
 
 const tauriMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -103,6 +104,23 @@ const noSupportedFilesScanResult: LibraryScanResult = {
   scannedDirectoryCount: 2,
   scannedFileCount: 4,
 };
+
+const discoveredMicrophones = [
+  {
+    id: "windows-mic-primary",
+    displayName: "USB Microphone",
+    kind: "windows-device" as const,
+    availability: "available" as const,
+    isDefault: true,
+  },
+  {
+    id: "windows-mic-secondary",
+    displayName: "USB Microphone",
+    kind: "windows-device" as const,
+    availability: "unavailable" as const,
+    isDefault: false,
+  },
+];
 
 const unpairedCandidatesScanResult: LibraryScanResult = {
   ...emptyScanResult,
@@ -224,6 +242,10 @@ function mockInvokeWith({
       return Promise.resolve(scanResult);
     }
 
+    if (command === "discover_local_microphone_sources") {
+      return Promise.resolve([]);
+    }
+
     return Promise.reject(new Error(`Unexpected command: ${command}`));
   });
 }
@@ -251,6 +273,10 @@ function mockSuccessfulLibraryInvoke(command: string) {
 
   if (command === "clear_library_index") {
     return Promise.resolve();
+  }
+
+  if (command === "discover_local_microphone_sources") {
+    return Promise.resolve([]);
   }
 
   return Promise.reject(new Error(`Unexpected command: ${command}`));
@@ -298,6 +324,11 @@ function renderStrictApp() {
 
 async function openLibraryWorkspace(user = userEvent.setup()) {
   await user.click(screen.getByRole("button", { name: "Library" }));
+  return user;
+}
+
+async function openMicrophoneWorkspace(user = userEvent.setup()) {
+  await user.click(screen.getByRole("button", { name: "Microphones" }));
   return user;
 }
 
@@ -377,6 +408,96 @@ describe("App shell", () => {
     expect(within(topBar).queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
     await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("load_library_settings"));
+  });
+});
+
+describe("Microphone workspace", () => {
+  it("shows loading and then an empty discovery state", async () => {
+    const deferred = createDeferred<LocalMicrophoneSource[]>();
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "discover_local_microphone_sources") {
+        return deferred.promise;
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+
+    expect(screen.getByText("Discovering local microphone inputs...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+
+    deferred.resolve([]);
+
+    expect(await screen.findByText("No local microphone inputs were found.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+  });
+
+  it("renders distinct discovered sources and the Windows default input", async () => {
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "discover_local_microphone_sources") {
+        return Promise.resolve(discoveredMicrophones);
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+
+    expect(await screen.findByText("2 local microphone inputs discovered.")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "USB Microphone" })).toHaveLength(2);
+    expect(screen.getByText("Default input")).toBeInTheDocument();
+    expect(screen.getByText("Available")).toBeInTheDocument();
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+  });
+
+  it("shows a recoverable discovery failure", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "discover_local_microphone_sources") {
+        return Promise.reject(new Error("backend unavailable"));
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+
+    expect(
+      await screen.findByText("Could not discover local microphone inputs."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+  });
+
+  it("refreshes discovery without creating channels or capture side effects", async () => {
+    let discoveryCount = 0;
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "discover_local_microphone_sources") {
+        discoveryCount += 1;
+        return Promise.resolve(discoveryCount === 1 ? [] : discoveredMicrophones);
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    await screen.findByText("No local microphone inputs were found.");
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(await screen.findByText("2 local microphone inputs discovered.")).toBeInTheDocument();
+    expect(discoveryCount).toBe(2);
+    expect(
+      screen.queryByRole("button", { name: /capture|assign|mute|gain/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      tauriMocks.invoke.mock.calls.some(([command]) =>
+        /channel|capture|assign/i.test(String(command)),
+      ),
+    ).toBe(false);
   });
 });
 

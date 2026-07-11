@@ -305,6 +305,7 @@ h3 {
 .library-action-button:focus-visible,
 .library-search-input:focus-visible,
 .song-load-button:focus-visible,
+.microphone-refresh-button:focus-visible,
 .seek-placeholder input:focus-visible,
 .volume-placeholder input:focus-visible {
   outline: 3px solid var(--accent-strong);
@@ -356,6 +357,70 @@ h3 {
   flex-direction: column;
   gap: var(--space-5);
   background: var(--app-bg);
+}
+
+.microphone-workspace {
+  min-width: 0;
+}
+
+.microphone-header {
+  display: flex;
+  gap: var(--space-5);
+  align-items: start;
+  justify-content: space-between;
+}
+
+.microphone-refresh-button {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-3);
+}
+
+.microphone-refresh-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.microphone-status p,
+.microphone-source-row h3,
+.microphone-source-row p {
+  margin: 0;
+}
+
+.microphone-status p,
+.microphone-source-row p {
+  color: var(--muted);
+}
+
+.microphone-error {
+  color: #ffc9c2 !important;
+}
+
+.microphone-source-list {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.microphone-source-row {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.microphone-default-label {
+  flex: none;
+  font-weight: 700;
 }
 
 .perform-view {
