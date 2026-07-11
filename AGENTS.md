@@ -62,17 +62,17 @@
 Major architectural changes follow this process:
 
 Design Review
-    ↓
+↓
 Draft RFC
-    ↓
+↓
 Discussion
-    ↓
+↓
 Accepted RFC
-    ↓
+↓
 Implementation
-    ↓
+↓
 Validation
-    ↓
+↓
 Commit
 
 Accepted RFCs are authoritative.

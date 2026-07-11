@@ -18,7 +18,7 @@ Its purpose is to establish clear, consistent terminology for the application's 
 
 Future architectural discussions, RFCs and implementations should use the terminology defined here rather than introducing competing concepts.
 
-This RFC intentionally defines *what* the system consists of rather than *how* it behaves.
+This RFC intentionally defines _what_ the system consists of rather than _how_ it behaves.
 
 ---
 

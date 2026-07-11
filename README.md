@@ -51,6 +51,10 @@ Library songs can be loaded directly into the player as a playback foundation. L
 
 The app owns one persistent audio element at the shell level. The bottom transport controls play, pause, seek, and volume, while the top bar shows current-song metadata. Queue-driven playback and lyric rendering are not implemented yet.
 
+## Local Microphone Discovery
+
+The Microphones workspace can discover local Windows audio input endpoints and identify the current Windows default input. Discovery reads endpoint metadata only: it does not open devices, capture audio, create microphone channels, or assign sources to singers. Device endpoint identifiers remain inside the Rust Windows adapter; the frontend receives stable opaque source IDs.
+
 ## Lyrics Parsing
 
 The Rust lyrics subsystem parses discovered `.ttml` files into a renderer-neutral timed lyric document. Parsed timing uses absolute milliseconds and supports the current foundation subset: `<tt>`, `<body>`, `<div>`, timed `<p>` lines, nested `<span>` text segments, `begin`, `end`, `dur`, clock times such as `00:01:02.345`, and offset times such as `2.5s` or `2500ms`.
@@ -81,7 +85,6 @@ npm run tauri:build
 
 Tauri packaging output is generated under `src-tauri\target\release\bundle` when native prerequisites are installed and the build succeeds.
 
-
 ## Architecture Milestone A1
 
 Established the architectural governance foundation for Karaoke Webview.
@@ -90,6 +93,7 @@ Introduced an RFC-driven development workflow where major architectural
 decisions are formalised before implementation.
 
 Added:
+
 - RFC documentation process
 - RFC template
 - Core RFC index
@@ -99,6 +103,7 @@ Added:
 - RFC-004 Karaoke Modes
 
 Updated:
+
 - AGENTS.md to reference the RFC workflow
 - Project documentation to establish architecture ownership
 

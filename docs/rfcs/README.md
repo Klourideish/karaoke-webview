@@ -4,7 +4,7 @@
 
 RFCs are the authoritative architectural decisions for Karaoke Webview.
 
-They describe *how the system is intended to behave*, not how it is implemented.
+They describe _how the system is intended to behave_, not how it is implemented.
 
 Rust, TypeScript, React, Android and networking implementations must follow accepted RFCs.
 
@@ -156,6 +156,15 @@ If implementation conflicts with an Accepted RFC:
 3. Request a Design Review.
 
 Do not silently redesign accepted architecture.
+
+---
+
+RFC filenames must use:
+
+RFC-<three-digit-number>-<short-kebab-case-title>.md
+
+The number and filename listed in the RFC index are authoritative.
+Renaming an RFC file requires updating all documentation references in the same change.
 
 ---
 
