@@ -12,6 +12,12 @@ mod windows;
 pub(crate) use manager::DiagnosticCaptureManager;
 use models::DiagnosticCaptureSnapshot;
 
+impl DiagnosticCaptureManager {
+    pub(crate) fn occupied_source_for_readiness(&self) -> Option<String> {
+        self.occupied_source_id()
+    }
+}
+
 #[tauri::command]
 pub(crate) fn diagnostic_capture_snapshot(
     manager: tauri::State<'_, DiagnosticCaptureManager>,

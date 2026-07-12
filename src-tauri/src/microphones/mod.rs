@@ -3,6 +3,7 @@ mod automatic_assignment;
 mod channel_registry;
 mod discovery;
 mod models;
+mod performance_readiness;
 mod recovery;
 
 #[cfg(test)]
@@ -16,7 +17,7 @@ pub(crate) use channel_registry::MicrophoneChannelRegistry;
 pub(crate) use models::DiscoveredMicrophoneSource;
 use models::{
     AutomaticAssignmentResult, MicrophoneAssignment, MicrophoneChannel, MicrophoneRecoveryState,
-    MicrophoneWaitingState,
+    MicrophoneWaitingState, PerformanceMicrophoneReadiness, PerformanceMicrophoneReadinessRequest,
 };
 pub(crate) use recovery::MicrophoneRecoveryRegistry;
 use std::sync::{Mutex, MutexGuard};
@@ -311,4 +312,25 @@ pub(crate) fn leave_microphone_channel_assigned(
     let _operation = operations.lock();
     require_persistent_channel(&channels, &channel_id)?;
     recovery.leave_assigned(&channel_id)
+}
+
+#[tauri::command]
+pub(crate) fn evaluate_performance_microphone_readiness(
+    request: PerformanceMicrophoneReadinessRequest,
+    channels: tauri::State<'_, MicrophoneChannelRegistry>,
+    assignments: tauri::State<'_, MicrophoneAssignmentRegistry>,
+    recovery: tauri::State<'_, MicrophoneRecoveryRegistry>,
+    capture: tauri::State<'_, crate::capture::DiagnosticCaptureManager>,
+    operations: tauri::State<'_, MicrophoneRegistryOperations>,
+) -> Result<PerformanceMicrophoneReadiness, String> {
+    let _operation = operations.lock();
+    let sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
+    performance_readiness::evaluate(
+        &request,
+        &sources,
+        &channels,
+        &assignments,
+        &recovery,
+        capture.occupied_source_for_readiness().as_deref(),
+    )
 }

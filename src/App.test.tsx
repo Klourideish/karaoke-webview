@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { LyricDocument } from "./lyrics";
 import type { LibraryScanResult, MediaSong } from "./media-library/types";
-import type { LocalMicrophoneSource } from "./microphones/types";
+import type { LocalMicrophoneSource, PerformanceMicrophoneReadiness } from "./microphones/types";
 import type { DiagnosticCaptureSnapshot } from "./microphones/diagnosticCapture";
 import { DIAGNOSTIC_LEVEL_POLL_INTERVAL_MS } from "./microphones/useDiagnosticCapture";
 import { LOCAL_MICROPHONE_REFRESH_INTERVAL_MS } from "./microphones/useLocalMicrophones";
@@ -166,6 +166,31 @@ const disconnectedRecoveryState = {
   reason: "One eligible replacement source is available; operator confirmation is required.",
   eligibleReplacementSourceIds: [secondAvailableMicrophone.id],
   automaticReplacementEligible: true,
+};
+
+const readyPerformanceMicrophoneReadiness: PerformanceMicrophoneReadiness = {
+  status: "ready",
+  mode: "standard",
+  message: "Microphones are ready for Performance preparation.",
+  lockedParticipants: [
+    {
+      singerId: "singer-1",
+      channelId: microphoneChannel.id,
+      sourceId: microphoneChannel.sourceId,
+    },
+  ],
+  participants: [
+    {
+      singerId: "singer-1",
+      status: "ready",
+      reason: "ready",
+      message: "Microphone path is ready for preparation.",
+      assignment: microphoneAssignment,
+      channel: microphoneChannel,
+      recovery: null,
+      captureAvailable: true,
+    },
+  ],
 };
 
 const idleCaptureSnapshot: DiagnosticCaptureSnapshot = {
@@ -332,6 +357,10 @@ function mockInvokeWith({
         return Promise.resolve([]);
       }
 
+      if (command === "evaluate_performance_microphone_readiness") {
+        return Promise.resolve(readyPerformanceMicrophoneReadiness);
+      }
+
       if (command === "start_diagnostic_capture") {
         return Promise.resolve(activeCaptureSnapshot(args?.sourceId));
       }
@@ -388,6 +417,10 @@ function mockSuccessfulLibraryInvoke(command: string) {
 
   if (command === "get_microphone_recovery_states") {
     return Promise.resolve([]);
+  }
+
+  if (command === "evaluate_performance_microphone_readiness") {
+    return Promise.resolve(readyPerformanceMicrophoneReadiness);
   }
 
   if (command === "stop_diagnostic_capture" || command === "diagnostic_capture_snapshot") {
@@ -1150,6 +1183,150 @@ describe("Microphone workspace", () => {
 
     expect(await screen.findByText(/Left assigned while/)).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Assigned singer" })).toHaveValue("singer-1");
+  });
+
+  it("checks Standard performance microphone readiness for assigned participants", async () => {
+    tauriMocks.invoke.mockImplementation(
+      (command: string, args?: { request?: { participantSingerIds?: string[] } }) => {
+        if (command === "discover_local_microphone_sources") {
+          return Promise.resolve(discoveredMicrophones);
+        }
+        if (command === "list_microphone_channels") {
+          return Promise.resolve([microphoneChannel]);
+        }
+        if (command === "sync_session_singers") {
+          return Promise.resolve([microphoneAssignment]);
+        }
+        if (command === "list_microphone_waiting_states") {
+          return Promise.resolve([]);
+        }
+        if (command === "evaluate_performance_microphone_readiness") {
+          expect(args).toEqual({
+            request: {
+              mode: "standard",
+              participantSingerIds: ["singer-1"],
+              allowAutomaticRecovery: true,
+              phase: "preparing",
+            },
+          });
+          return Promise.resolve(readyPerformanceMicrophoneReadiness);
+        }
+        return mockSuccessfulLibraryInvoke(command);
+      },
+    );
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    await user.click(await screen.findByRole("button", { name: "Check readiness" }));
+
+    expect(await screen.findByText(/Status: Ready/)).toBeInTheDocument();
+    expect(screen.getByText("Locked microphone participant: 1")).toBeInTheDocument();
+    expect(screen.getByText("Ready · Ready")).toBeInTheDocument();
+    expect(screen.getAllByText(`${microphoneChannel.id} · Available`).length).toBeGreaterThan(0);
+  });
+
+  it("shows diagnostic capture as a Performance readiness blocker", async () => {
+    const blockedReadiness: PerformanceMicrophoneReadiness = {
+      ...readyPerformanceMicrophoneReadiness,
+      status: "blocked",
+      message: "Stop diagnostic capture before preparing this Performance.",
+      lockedParticipants: [],
+      participants: [
+        {
+          ...readyPerformanceMicrophoneReadiness.participants[0],
+          status: "blocked",
+          reason: "diagnostic-session-active",
+          message: "A diagnostic capture session is using this microphone source.",
+          captureAvailable: false,
+        },
+      ],
+    };
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "discover_local_microphone_sources") {
+        return Promise.resolve(discoveredMicrophones);
+      }
+      if (command === "list_microphone_channels") {
+        return Promise.resolve([microphoneChannel]);
+      }
+      if (command === "sync_session_singers") {
+        return Promise.resolve([microphoneAssignment]);
+      }
+      if (command === "list_microphone_waiting_states") {
+        return Promise.resolve([]);
+      }
+      if (command === "evaluate_performance_microphone_readiness") {
+        return Promise.resolve(blockedReadiness);
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    await user.click(await screen.findByRole("button", { name: "Check readiness" }));
+
+    expect(await screen.findByText(/Status: Blocked/)).toBeInTheDocument();
+    expect(screen.getByText(/Diagnostic Session Active/)).toBeInTheDocument();
+    expect(
+      screen.getByText("A diagnostic capture session is using this microphone source."),
+    ).toBeInTheDocument();
+  });
+
+  it("refreshes visible channel and recovery state after readiness performs safe recovery", async () => {
+    const recoveredChannel = {
+      ...microphoneChannel,
+      sourceId: secondAvailableMicrophone.id,
+      sourceDisplayName: secondAvailableMicrophone.displayName,
+    };
+    const recoveredReadiness: PerformanceMicrophoneReadiness = {
+      ...readyPerformanceMicrophoneReadiness,
+      lockedParticipants: [
+        {
+          singerId: "singer-1",
+          channelId: recoveredChannel.id,
+          sourceId: recoveredChannel.sourceId,
+        },
+      ],
+      participants: [
+        {
+          ...readyPerformanceMicrophoneReadiness.participants[0],
+          channel: recoveredChannel,
+        },
+      ],
+    };
+    let recovered = false;
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "discover_local_microphone_sources") {
+        return Promise.resolve([secondAvailableMicrophone]);
+      }
+      if (command === "list_microphone_channels") {
+        return Promise.resolve([recovered ? recoveredChannel : disconnectedMicrophoneChannel]);
+      }
+      if (command === "sync_session_singers") {
+        return Promise.resolve([microphoneAssignment]);
+      }
+      if (command === "list_microphone_waiting_states") {
+        return Promise.resolve([]);
+      }
+      if (command === "get_microphone_recovery_states") {
+        return Promise.resolve(recovered ? [] : [disconnectedRecoveryState]);
+      }
+      if (command === "evaluate_performance_microphone_readiness") {
+        recovered = true;
+        return Promise.resolve(recoveredReadiness);
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    expect(await screen.findByText("USB Microphone · Disconnected")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Check readiness" }));
+
+    expect(await screen.findByText("Desk Microphone · Available")).toBeInTheDocument();
+    expect(screen.getByText(/Status: Ready/)).toBeInTheDocument();
   });
 
   it("updates the visible registry after an automatic discovery refresh", async () => {

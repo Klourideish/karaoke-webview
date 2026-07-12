@@ -24,6 +24,7 @@ pub fn run() {
             media_library::load_library_settings,
             microphones::create_microphone_channel,
             microphones::discover_local_microphone_sources,
+            microphones::evaluate_performance_microphone_readiness,
             microphones::get_microphone_recovery_states,
             microphones::leave_microphone_channel_assigned,
             microphones::list_microphone_channels,

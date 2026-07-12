@@ -4,6 +4,8 @@ import type {
   LocalMicrophoneChannel,
   LocalMicrophoneSource,
   MicrophoneAssignment,
+  PerformanceMicrophoneReadiness,
+  PerformanceMicrophoneReadinessRequest,
   MicrophoneRecoveryState,
   MicrophoneWaitingState,
 } from "./types";
@@ -87,4 +89,12 @@ export function leaveMicrophoneChannelAssigned(
   channelId: string,
 ): Promise<MicrophoneRecoveryState> {
   return invoke<MicrophoneRecoveryState>("leave_microphone_channel_assigned", { channelId });
+}
+
+export function evaluatePerformanceMicrophoneReadiness(
+  request: PerformanceMicrophoneReadinessRequest,
+): Promise<PerformanceMicrophoneReadiness> {
+  return invoke<PerformanceMicrophoneReadiness>("evaluate_performance_microphone_readiness", {
+    request,
+  });
 }

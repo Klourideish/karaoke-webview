@@ -72,6 +72,20 @@ impl DiagnosticCaptureManager {
         lock_inner(&self.inner).snapshot.clone()
     }
 
+    pub(crate) fn occupied_source_id(&self) -> Option<String> {
+        let snapshot = &lock_inner(&self.inner).snapshot;
+        if matches!(
+            snapshot.status,
+            DiagnosticCaptureStatus::Starting
+                | DiagnosticCaptureStatus::Active
+                | DiagnosticCaptureStatus::Stopping
+        ) {
+            snapshot.source_id.clone()
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn start(&self, source_id: String) -> DiagnosticCaptureSnapshot {
         let _operation = lock_mutex(&self.operations);
         self.stop_locked();

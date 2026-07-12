@@ -1,10 +1,12 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import type { Singer } from "../app/SingerBar";
+import type { KaraokeMode } from "../host-domain/types";
 import { useDiagnosticCapture } from "../microphones/useDiagnosticCapture";
 import type { useLocalMicrophones } from "../microphones/useLocalMicrophones";
 import { useMicrophoneChannels } from "../microphones/useMicrophoneChannels";
 import type { useMicrophoneAssignments } from "../microphones/useMicrophoneAssignments";
 import { useMicrophoneRecovery } from "../microphones/useMicrophoneRecovery";
+import { usePerformanceMicrophoneReadiness } from "../microphones/usePerformanceMicrophoneReadiness";
 
 export function MicrophoneWorkspace({
   assignments,
@@ -22,6 +24,7 @@ export function MicrophoneWorkspace({
   );
   const channelRegistry = useMicrophoneChannels(discovery.sources);
   const recovery = useMicrophoneRecovery(discovery.sources, channelRegistry.channels);
+  const readiness = usePerformanceMicrophoneReadiness();
   const usedSourceIds = useMemo(
     () => new Set(channelRegistry.channels.map((channel) => channel.sourceId)),
     [channelRegistry.channels],
@@ -31,6 +34,8 @@ export function MicrophoneWorkspace({
     [assignments.assignments],
   );
   const [selectedSourceId, setSelectedSourceId] = useState("");
+  const [readinessMode, setReadinessMode] = useState<KaraokeMode>("standard");
+  const [allowAutomaticRecovery, setAllowAutomaticRecovery] = useState(true);
   const {
     snapshot: captureSnapshot,
     start: startCapture,
@@ -66,6 +71,30 @@ export function MicrophoneWorkspace({
   const canStart =
     selectedSource !== null && !isTransitioning && captureSnapshot.status !== "active";
   const canStop = captureSnapshot.status === "active";
+  const proposedParticipantIds = useMemo(() => {
+    const assignedSingerIdsInOrder = singers
+      .filter((singer) =>
+        assignments.assignments.some((assignment) => assignment.singerId === singer.id),
+      )
+      .map((singer) => singer.id);
+    if (readinessMode === "party") {
+      return singers.map((singer) => singer.id);
+    }
+    if (assignedSingerIdsInOrder.length > 0) {
+      return assignedSingerIdsInOrder;
+    }
+    return singers.slice(0, readinessMode === "battle" ? 2 : 1).map((singer) => singer.id);
+  }, [assignments.assignments, readinessMode, singers]);
+
+  async function checkPerformanceReadiness() {
+    await readiness.check({
+      allowAutomaticRecovery,
+      mode: readinessMode,
+      participantSingerIds: proposedParticipantIds,
+    });
+    await channelRegistry.refresh();
+    await recovery.refresh();
+  }
 
   return (
     <section className="view-panel microphone-workspace" aria-labelledby="view-heading">
@@ -339,6 +368,89 @@ export function MicrophoneWorkspace({
         ) : null}
       </section>
 
+      <section className="microphone-test-panel" aria-labelledby="microphone-readiness-heading">
+        <div>
+          <p className="region-label">Performance preparation</p>
+          <h3 id="microphone-readiness-heading">Microphone readiness</h3>
+        </div>
+        <p className="view-description">
+          Checks proposed participants before countdown without starting capture.
+        </p>
+        <div className="microphone-readiness-controls">
+          <label>
+            Mode
+            <select
+              className="microphone-select"
+              value={readinessMode}
+              onChange={(event) => setReadinessMode(event.target.value as KaraokeMode)}
+            >
+              <option value="standard">Standard</option>
+              <option value="party">Party</option>
+              <option value="battle">Battle</option>
+            </select>
+          </label>
+          <label className="microphone-checkbox-label">
+            <input
+              type="checkbox"
+              checked={allowAutomaticRecovery}
+              onChange={(event) => setAllowAutomaticRecovery(event.target.checked)}
+            />
+            Allow one-source recovery before countdown
+          </label>
+          <button
+            className="microphone-test-button"
+            type="button"
+            disabled={readiness.isChecking}
+            onClick={() => void checkPerformanceReadiness()}
+          >
+            Check readiness
+          </button>
+        </div>
+        {readiness.error ? (
+          <p className="microphone-error" role="alert">
+            {readiness.error}
+          </p>
+        ) : null}
+        {readiness.result ? (
+          <div className="microphone-readiness-result" aria-live="polite">
+            <p>
+              Status: {readinessStatusLabel(readiness.result.status)} · {readiness.result.message}
+            </p>
+            <p>
+              Locked microphone participant
+              {readiness.result.lockedParticipants.length === 1 ? "" : "s"}:{" "}
+              {readiness.result.lockedParticipants.length}
+            </p>
+            <ul className="microphone-source-list" aria-label="Participant microphone readiness">
+              {readiness.result.participants.map((participant) => {
+                const singerName =
+                  singers.find((singer) => singer.id === participant.singerId)?.displayName ??
+                  participant.singerId;
+                return (
+                  <li className="microphone-source-row" key={participant.singerId}>
+                    <div>
+                      <h4>{singerName}</h4>
+                      <p>
+                        {readinessStatusLabel(participant.status)} ·{" "}
+                        {readinessReasonLabel(participant.reason)}
+                      </p>
+                      <p>{participant.message}</p>
+                    </div>
+                    <div className="microphone-source-actions">
+                      <span>
+                        {participant.channel
+                          ? `${participant.channel.id} · ${channelStateLabel(participant.channel.state)}`
+                          : "No locked channel"}
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
+      </section>
+
       <section className="microphone-test-panel" aria-labelledby="microphone-test-heading">
         <div>
           <p className="region-label">Diagnostic capture</p>
@@ -434,6 +546,17 @@ function recoveryStatusLabel(
   status: "healthy" | "disconnected" | "recovering" | "replacement-available" | "recovery-failed",
 ) {
   return status
+    .split("-")
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function readinessStatusLabel(status: "ready" | "degraded" | "blocked") {
+  return `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
+}
+
+function readinessReasonLabel(reason: string) {
+  return reason
     .split("-")
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
