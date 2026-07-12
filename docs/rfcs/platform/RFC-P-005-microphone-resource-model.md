@@ -1,4 +1,4 @@
-# RFC-007 – Microphone Lifecycle
+# RFC-P-005 – Microphone Resource Model
 
 > **Authority**
 >
@@ -14,9 +14,9 @@
 >
 > This RFC extends:
 >
-> - RFC-001 – Host Authority
-> - RFC-002 – Domain Model
-> - RFC-003 – Performance Lifecycle
+> - RFC-P-001 – Platform Authority
+> - RFC-P-002 – Platform Domain Model
+> - RFC-P-003 – Performance Lifecycle
 >
 > It does not redefine those documents.
 
@@ -62,7 +62,7 @@ Separating microphone sources from microphone channels provides:
 
 # 3. Decisions
 
-## RFC-007.1
+## RFC-P-005.1
 
 ### Decision
 
@@ -74,7 +74,7 @@ Channels coordinate assignment, readiness and capture independently of the physi
 
 ---
 
-## RFC-007.2
+## RFC-P-005.2
 
 ### Decision
 
@@ -92,7 +92,7 @@ The source abstraction isolates hardware and transport differences from the host
 
 ---
 
-## RFC-007.3
+## RFC-P-005.3
 
 ### Decision
 
@@ -104,7 +104,7 @@ Sources may disconnect or be replaced while preserving channel identity.
 
 ---
 
-## RFC-007.4
+## RFC-P-005.4
 
 ### Decision
 
@@ -116,7 +116,7 @@ Assignment belongs to the karaoke session rather than individual performances.
 
 ---
 
-## RFC-007.5
+## RFC-P-005.5
 
 ### Decision
 
@@ -130,7 +130,7 @@ Future RFCs may extend this behaviour.
 
 ---
 
-## RFC-007.6
+## RFC-P-005.6
 
 ### Decision
 
@@ -146,7 +146,7 @@ Automatic assignment provides convenience while manual control supports recovery
 
 ---
 
-## RFC-007.7
+## RFC-P-005.7
 
 ### Decision
 
@@ -165,7 +165,7 @@ Maintaining capture readiness reduces latency between performances.
 
 ---
 
-## RFC-007.8
+## RFC-P-005.8
 
 ### Decision
 
@@ -177,7 +177,7 @@ Operational properties should not multiply lifecycle complexity.
 
 ---
 
-## RFC-007.9
+## RFC-P-005.9
 
 ### Decision
 
@@ -189,7 +189,7 @@ Readiness should not depend upon future scoring policies.
 
 ---
 
-## RFC-007.10
+## RFC-P-005.10
 
 ### Decision
 
@@ -239,7 +239,7 @@ The lifecycle separates assignment, preparation, capture and recovery.
 
 ---
 
-## RFC-007.11
+## RFC-P-005.11
 
 ### Decision
 
@@ -253,7 +253,7 @@ Preparation should complete before scoring begins.
 
 ---
 
-## RFC-007.12
+## RFC-P-005.12
 
 ### Decision
 
@@ -265,7 +265,7 @@ Capture completion must precede scoring finalization and history persistence.
 
 ---
 
-## RFC-007.13
+## RFC-P-005.13
 
 ### Decision
 
@@ -277,7 +277,7 @@ Singers commonly retain the same microphone throughout a karaoke session.
 
 ---
 
-## RFC-007.14
+## RFC-P-005.14
 
 ### Decision
 
@@ -289,7 +289,7 @@ Logical channel identity should remain stable during technical recovery.
 
 ---
 
-## RFC-007.15
+## RFC-P-005.15
 
 ### Decision
 
@@ -301,7 +301,7 @@ Monitoring, diagnostics and future recording policies require continuous capture
 
 ---
 
-## RFC-007.16
+## RFC-P-005.16
 
 ### Decision
 
@@ -351,9 +351,9 @@ Temporary failures should not destroy assignment or singer relationships.
 
 # 6. Dependencies
 
-- RFC-001 – Host Authority
-- RFC-002 – Domain Model
-- RFC-003 – Performance Lifecycle
+- RFC-P-001 – Platform Authority
+- RFC-P-002 – Platform Domain Model
+- RFC-P-003 – Performance Lifecycle
 
 ---
 
@@ -390,10 +390,10 @@ This RFC does not:
 
 This RFC is extended by:
 
-- RFC-008 – Capture Sessions
-- RFC-009 – Protocol & Connection State Machine
-- RFC-010 – Scoring Pipeline
-- RFC-012 – Recording & Media Capture
+- RFC-P-006 – Capture Session Model
+- RFC-P-008 – Protocol & Connection State Machine
+- RFC-P-009 – Scoring Pipeline
+- RFC-P-011 – Recording & Media Capture
 
 ---
 
@@ -449,10 +449,10 @@ Initial accepted version.
 
 > **Relationship to the Core RFCs**
 >
-> RFC-001 defines authority.
+> RFC-P-001 defines authority.
 >
-> RFC-002 defines microphone terminology.
+> RFC-P-002 defines microphone terminology.
 >
-> RFC-003 defines how Performances progress.
+> RFC-P-003 defines how Performances progress.
 >
-> RFC-007 defines how microphone infrastructure participates within that lifecycle while remaining transport-independent.
+> RFC-P-005 defines how microphone infrastructure participates within that lifecycle while remaining transport-independent.

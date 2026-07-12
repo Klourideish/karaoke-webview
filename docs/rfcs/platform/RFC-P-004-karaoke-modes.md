@@ -1,4 +1,4 @@
-# RFC-004 – Karaoke Modes
+# RFC-P-004 – Karaoke Modes
 
 > **Authority**
 >
@@ -24,7 +24,7 @@ This RFC defines the supported karaoke operating modes.
 
 Operational modes determine how singers participate, how performances are organised, how results are interpreted, and whether scores become part of permanent history.
 
-Modes extend the common Performance Lifecycle defined in RFC-003 without redefining it.
+Modes extend the common Performance Lifecycle defined in RFC-P-003 without redefining it.
 
 Every mode shares the same architectural foundation while applying different participation and scoring rules.
 
@@ -46,7 +46,7 @@ Rather than creating separate systems, Karaoke Webview supports multiple operati
 
 # 3. Decisions
 
-## RFC-004.1
+## RFC-P-004.1
 
 ### Decision
 
@@ -62,11 +62,11 @@ These modes cover traditional karaoke, casual social play, and structured compet
 
 ---
 
-## RFC-004.2
+## RFC-P-004.2
 
 ### Decision
 
-All modes share the same Host Authority, Domain Model and Performance Lifecycle.
+All modes share the same Platform Authority, Platform Domain Model and Performance Lifecycle.
 
 ### Reason
 
@@ -74,7 +74,7 @@ Operational modes modify rules rather than replacing the core architecture.
 
 ---
 
-## RFC-004.3
+## RFC-P-004.3
 
 ### Decision
 
@@ -86,7 +86,7 @@ Every active Performance within a Host Session should operate under one consiste
 
 ---
 
-## RFC-004.4
+## RFC-P-004.4
 
 ### Decision
 
@@ -98,7 +98,7 @@ Traditional karaoke commonly consists of solo performances and duets.
 
 ---
 
-## RFC-004.5
+## RFC-P-004.5
 
 ### Decision
 
@@ -110,7 +110,7 @@ Standard Mode represents normal karaoke sessions and therefore contributes to pe
 
 ---
 
-## RFC-004.6
+## RFC-P-004.6
 
 ### Decision
 
@@ -122,7 +122,7 @@ Party Mode prioritises participation over structured competition.
 
 ---
 
-## RFC-004.7
+## RFC-P-004.7
 
 ### Decision
 
@@ -134,7 +134,7 @@ Party sessions should remain relaxed and encourage participation without permane
 
 ---
 
-## RFC-004.8
+## RFC-P-004.8
 
 ### Decision
 
@@ -146,7 +146,7 @@ Battle Mode is intended for organised competition rather than free participation
 
 ---
 
-## RFC-004.9
+## RFC-P-004.9
 
 ### Decision
 
@@ -164,7 +164,7 @@ Competitive performances require clear ownership of scoring intervals.
 
 ---
 
-## RFC-004.10
+## RFC-P-004.10
 
 ### Decision
 
@@ -176,7 +176,7 @@ Battle performances represent organised competition rather than casual participa
 
 ---
 
-## RFC-004.11
+## RFC-P-004.11
 
 ### Decision
 
@@ -227,9 +227,9 @@ This should be avoided by extending behaviour through mode policies rather than 
 
 # 6. Dependencies
 
-- RFC-001 – Host Authority
-- RFC-002 – Domain Model
-- RFC-003 – Performance Lifecycle
+- RFC-P-001 – Platform Authority
+- RFC-P-002 – Platform Domain Model
+- RFC-P-003 – Performance Lifecycle
 
 ---
 
@@ -255,7 +255,7 @@ These are defined by future RFCs.
 This RFC does not:
 
 - redefine the Performance Lifecycle
-- redefine Host Authority
+- redefine Platform Authority
 - redefine Domain terminology
 - specify scoring implementation
 - define battle choreography
@@ -268,10 +268,10 @@ Its purpose is solely to define operational policy.
 
 This RFC is extended by:
 
-- RFC-006 – History & Leaderboards
-- RFC-007 – Microphone Lifecycle
-- RFC-010 – Scoring Pipeline
-- RFC-011 – Battle Maps
+- RFC-P-013 – History & Leaderboards
+- RFC-P-005 – Microphone Resource Model
+- RFC-P-009 – Scoring Pipeline
+- RFC-P-010 – Battle Performance Coordination
 
 ---
 
@@ -319,12 +319,12 @@ Initial accepted version.
 
 > **Relationship to the Core RFCs**
 >
-> RFC-001 establishes authority.
+> RFC-P-001 establishes authority.
 >
-> RFC-002 establishes vocabulary.
+> RFC-P-002 establishes vocabulary.
 >
-> RFC-003 establishes lifecycle.
+> RFC-P-003 establishes lifecycle.
 >
-> RFC-004 establishes operational policy.
+> RFC-P-004 establishes operational policy.
 >
 > Together these four RFCs form the architectural foundation of Karaoke Webview.

@@ -85,30 +85,19 @@ npm run tauri:build
 
 Tauri packaging output is generated under `src-tauri\target\release\bundle` when native prerequisites are installed and the build succeeds.
 
-## Architecture Milestone A1
+## Architecture Governance
 
-Established the architectural governance foundation for Karaoke Webview.
+Karaoke Webview uses an RFC-driven architecture workflow for major platform decisions.
 
-Introduced an RFC-driven development workflow where major architectural
-decisions are formalised before implementation.
+Canonical RFCs now live under namespaced trees:
 
-Added:
+- `docs/rfcs/platform/` for platform-wide architecture
+- `docs/rfcs/host/` for Windows host architecture
+- `docs/rfcs/android/` for Android companion architecture
 
-- RFC documentation process
-- RFC template
-- Core RFC index
-- RFC-001 Host Authority
-- RFC-002 Domain Model
-- RFC-003 Performance Lifecycle
-- RFC-004 Karaoke Modes
+Start with [Platform architecture](docs/rfcs/PLATFORM_ARCHITECTURE.md), [Core Platform RFCs](docs/rfcs/platform/CORE_PLATFORM_RFCS.md), and the [RFC namespace migration](docs/rfcs/RFC_NAMESPACE_MIGRATION.md).
 
-Updated:
-
-- AGENTS.md to reference the RFC workflow
-- Project documentation to establish architecture ownership
-
-This milestone marks the transition from feature-led development to
-architecture-led development.
+Accepted RFCs are the authoritative source for architectural decisions within the repository.
 
 Future subsystems are expected to follow:
 
@@ -117,6 +106,3 @@ Design Review
 → Implementation
 → Validation
 → Commit
-
-Accepted RFCs are now the authoritative source for architectural
-decisions within the repository.

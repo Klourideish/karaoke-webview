@@ -1,51 +1,48 @@
 # Request For Comments (RFC)
 
-## Purpose
-
 RFCs are the authoritative architectural decisions for Karaoke Webview.
 
-They describe _how the system is intended to behave_, not how it is implemented.
+They describe how the system is intended to behave, not how it is implemented.
 
-Rust, TypeScript, React, Android and networking implementations must follow accepted RFCs.
+Rust, TypeScript, React, Android, protocol, scoring, recording, and future implementations must follow accepted RFCs.
 
 ---
 
-## Core RFCs
+## Namespaces
 
-RFC-001 through RFC-004 define the architectural foundation of Karaoke Webview.
+Karaoke Webview uses three RFC namespaces:
 
-These RFCs establish:
+- `platform/` - cross-surface architectural rules for the whole Karaoke Webview platform.
+- `host/` - Windows Host architecture that extends Platform RFCs.
+- `android/` - Android Companion architecture that extends Platform RFCs.
 
-- Authority
-- Vocabulary
-- Behaviour
-- Operational Modes
+The root `docs/rfcs/` directory contains indexes, migration notes, and governance documents only.
 
-Future RFCs are expected to extend these documents rather than replace them.
+---
 
-Changes to Core RFCs should be rare and require a Design Review.
+## Core Indexes
+
+- `platform/CORE_PLATFORM_RFCS.md` - accepted shared Platform RFCs.
+- `host/CORE_HOST_RFCS.md` - accepted Windows Host RFCs.
+- `android/CORE_ANDROID_RFCS.md` - accepted Android Companion RFCs.
+
+Empty Host or Android indexes are intentional until implementation-specific RFCs are accepted.
 
 ---
 
 ## Lifecycle
 
 Design Review
-↓
 
 Draft RFC
-↓
 
 Discussion
-↓
 
 Accepted RFC
-↓
 
 Implementation
-↓
 
 Validation
-↓
 
 Commit
 
@@ -53,13 +50,11 @@ Commit
 
 ## Status
 
-Draft
-
-Accepted
-
-Superseded
-
-Deprecated
+- Draft
+- Accepted
+- Superseded
+- Deprecated
+- Reserved
 
 ---
 
@@ -67,13 +62,17 @@ Deprecated
 
 Accepted RFCs are authoritative.
 
+Platform RFCs override Host and Android RFCs when conflicts exist.
+
+Host and Android RFCs extend Platform RFCs and never redefine Platform contracts.
+
 Implementation must not silently violate an accepted RFC.
 
 If implementation reveals an architectural conflict:
 
-- stop implementation
-- report the conflict
-- request a new Design Review
+1. Stop implementation.
+2. Report the conflict.
+3. Request a new Design Review.
 
 Do not redesign accepted architecture during implementation.
 
@@ -83,88 +82,43 @@ Do not redesign accepted architecture during implementation.
 
 RFCs define architecture.
 
-They do not define:
-
-- implementation details
-- UI styling
-- Rust APIs
-- React components
-- Android APIs
-- packet formats
-- database schemas
-
-unless those are themselves the architectural decision.
+They do not define implementation details, UI styling, Rust APIs, React components, Android APIs, packet formats, or database schemas unless those are themselves the architectural decision.
 
 ---
 
 ## Naming
 
-RFC-001
-RFC-002
-...
+Platform RFCs use:
 
-Numbers are never reused.
+```text
+RFC-P-<three-digit-number>-<short-kebab-case-title>.md
+```
 
-Superseded RFCs remain in the repository.
+Host RFCs use:
 
----
+```text
+RFC-H-<three-digit-number>-<short-kebab-case-title>.md
+```
 
-## References
+Android RFCs use:
 
-RFCs may depend upon earlier RFCs.
+```text
+RFC-A-<three-digit-number>-<short-kebab-case-title>.md
+```
 
-Implementation prompts should reference only the RFCs relevant to the task.
+Numbers are never reused inside a namespace.
 
----
-
-## Accepted
-
-An Accepted RFC represents the current architectural authority for its subject.
-
-Accepted RFCs are considered frozen.
-
-Implementation must conform to Accepted RFCs.
-
-If implementation reveals a conflict with an Accepted RFC, the implementation should stop and a new Design Review should be requested.
-
-Accepted RFCs are never silently modified during feature development.
+Old flat `RFC-###` identifiers are historical aliases only. See `RFC_NAMESPACE_MIGRATION.md`.
 
 ---
 
-## Foundational RFCs
+## Templates
 
-RFC-001 through RFC-004 define the architectural foundation of Karaoke Webview.
+Use the namespace-specific templates:
 
-Changes to these RFCs should be rare.
-
-Where possible, future RFCs should extend these documents rather than modify them.
-
-If modification becomes necessary, the existing RFC should normally be superseded rather than rewritten.
-
----
-
-## Architecture Authority
-
-Accepted RFCs are the authoritative source for architectural decisions.
-
-Implementation must conform to Accepted RFCs.
-
-If implementation conflicts with an Accepted RFC:
-
-1. Stop implementation.
-2. Report the conflict.
-3. Request a Design Review.
-
-Do not silently redesign accepted architecture.
-
----
-
-RFC filenames must use:
-
-RFC-<three-digit-number>-<short-kebab-case-title>.md
-
-The number and filename listed in the RFC index are authoritative.
-Renaming an RFC file requires updating all documentation references in the same change.
+- `platform/RFC-P-TEMPLATE.md`
+- `host/RFC-H-TEMPLATE.md`
+- `android/RFC-A-TEMPLATE.md`
 
 ---
 
@@ -172,28 +126,21 @@ Renaming an RFC file requires updating all documentation references in the same 
 
 For contributors new to the project, the recommended reading order is:
 
-1. CORE_RFCS.md
-2. RFC-001 – Host Authority
-3. RFC-002 – Domain Model
-4. RFC-003 – Performance Lifecycle
-5. RFC-004 – Karaoke Modes
-
-Additional RFCs build upon this foundation.
+1. `PLATFORM_ARCHITECTURE.md`
+2. `platform/CORE_PLATFORM_RFCS.md`
+3. `platform/RFC-P-001-platform-authority.md`
+4. `platform/RFC-P-002-platform-domain-model.md`
+5. `platform/RFC-P-003-performance-lifecycle.md`
+6. `platform/RFC-P-004-karaoke-modes.md`
+7. Topic-specific Platform RFCs
+8. Relevant Host or Android RFCs
 
 ---
 
-## Naming Convention
+## Migration
 
-RFC documents use the following filename format:
+The project migrated from the original flat RFC namespace to Platform, Host, and Android namespaces on 2026-07-12.
 
-RFC-<number>-<short-title>.md
+The migration preserves accepted architectural meaning.
 
-Examples:
-
-- RFC-001-host-authority.md
-- RFC-002-domain-model.md
-- RFC-003-performance-lifecycle.md
-
-The RFC number is the authoritative identifier.
-
-The filename is descriptive for readability and repository navigation.
+See `RFC_NAMESPACE_MIGRATION.md` for the full mapping.

@@ -1,4 +1,4 @@
-# RFC-003 – Performance Lifecycle
+# RFC-P-003 – Performance Lifecycle
 
 > **Authority**
 >
@@ -53,7 +53,7 @@ The lifecycle defined here provides stable transition points while preserving th
 
 # 3. Decisions
 
-## RFC-003.1
+## RFC-P-003.1
 
 ### Decision
 
@@ -65,7 +65,7 @@ A queued song represents an intention. It may be removed, reordered, or skipped 
 
 ---
 
-## RFC-003.2
+## RFC-P-003.2
 
 ### Decision
 
@@ -77,7 +77,7 @@ Preparation requires a stable Performance identity, but merely adding a song to 
 
 ---
 
-## RFC-003.3
+## RFC-P-003.3
 
 ### Decision
 
@@ -100,7 +100,7 @@ These states provide clear coordination points without combining subsystem-speci
 
 ---
 
-## RFC-003.4
+## RFC-P-003.4
 
 ### Decision
 
@@ -123,7 +123,7 @@ A controlled transition sequence prevents subsystems from independently advancin
 
 ---
 
-## RFC-003.5
+## RFC-P-003.5
 
 ### Decision
 
@@ -137,7 +137,7 @@ Subsystems may report readiness, completion, degradation, or failure, but the ho
 
 ---
 
-## RFC-003.6
+## RFC-P-003.6
 
 ### Decision
 
@@ -159,7 +159,7 @@ Subsystem readiness must remain separate from the Performance lifecycle while st
 
 ---
 
-## RFC-003.7
+## RFC-P-003.7
 
 ### Decision
 
@@ -173,7 +173,7 @@ A lyric failure therefore blocks transition to `ready`.
 
 ---
 
-## RFC-003.8
+## RFC-P-003.8
 
 ### Decision
 
@@ -191,7 +191,7 @@ Audio-only Performances are unscored and excluded from normal karaoke leaderboar
 
 ---
 
-## RFC-003.9
+## RFC-P-003.9
 
 ### Decision
 
@@ -212,7 +212,7 @@ Countdown prepares participants and systems without creating a competing media t
 
 ---
 
-## RFC-003.10
+## RFC-P-003.10
 
 ### Decision
 
@@ -226,7 +226,7 @@ Mode-specific rules may classify late reconnects as partial or practice particip
 
 ---
 
-## RFC-003.11
+## RFC-P-003.11
 
 ### Decision
 
@@ -238,7 +238,7 @@ Lyrics, scoring, microphone alignment, and clients must derive timing from one s
 
 ---
 
-## RFC-003.12
+## RFC-P-003.12
 
 ### Decision
 
@@ -252,7 +252,7 @@ Emergency Stop remains available as a separate action.
 
 ---
 
-## RFC-003.13
+## RFC-P-003.13
 
 ### Decision
 
@@ -270,7 +270,7 @@ Session flow controls whether another Performance may begin without interrupting
 
 ---
 
-## RFC-003.14
+## RFC-P-003.14
 
 ### Decision
 
@@ -282,7 +282,7 @@ The current song should finish naturally while still allowing the operator to su
 
 ---
 
-## RFC-003.15
+## RFC-P-003.15
 
 ### Decision
 
@@ -303,7 +303,7 @@ The next Performance must not begin before official results and history are safe
 
 ---
 
-## RFC-003.16
+## RFC-P-003.16
 
 ### Decision
 
@@ -317,7 +317,7 @@ Results should be visible without unnecessarily slowing the natural flow of a ka
 
 ---
 
-## RFC-003.17
+## RFC-P-003.17
 
 ### Decision
 
@@ -335,7 +335,7 @@ Queue progression must not race scoring, history storage, or operator pause inte
 
 ---
 
-## RFC-003.18
+## RFC-P-003.18
 
 ### Decision
 
@@ -354,7 +354,7 @@ Stopped Performances:
 
 ---
 
-## RFC-003.19
+## RFC-P-003.19
 
 ### Decision
 
@@ -373,7 +373,7 @@ Failed Performances:
 
 ---
 
-## RFC-003.20
+## RFC-P-003.20
 
 ### Decision
 
@@ -387,7 +387,7 @@ A replay or retry creates a new Performance.
 
 ---
 
-## RFC-003.21
+## RFC-P-003.21
 
 ### Decision
 
@@ -422,7 +422,7 @@ Clients and operator interfaces may request changes, but only the host emits aut
 
 ---
 
-## RFC-003.22
+## RFC-P-003.22
 
 ### Decision
 
@@ -482,8 +482,8 @@ These risks should be mitigated through clear subsystem boundaries, timeouts, di
 
 # 6. Dependencies
 
-- RFC-001 – Host Authority
-- RFC-002 – Domain Model
+- RFC-P-001 – Platform Authority
+- RFC-P-002 – Platform Domain Model
 
 ---
 
@@ -522,14 +522,14 @@ This RFC does not support:
 
 This RFC is extended by:
 
-- RFC-004 – Karaoke Modes
-- RFC-006 – History & Leaderboards
-- RFC-007 – Microphone Lifecycle
-- RFC-008 – Capture Sessions
-- RFC-009 – Protocol & Connection State Machine
-- RFC-010 – Scoring Pipeline
-- RFC-011 – Battle Maps
-- RFC-012 – Recording & Media Capture
+- RFC-P-004 – Karaoke Modes
+- RFC-P-013 – History & Leaderboards
+- RFC-P-005 – Microphone Resource Model
+- RFC-P-006 – Capture Session Model
+- RFC-P-008 – Protocol & Connection State Machine
+- RFC-P-009 – Scoring Pipeline
+- RFC-P-010 – Battle Performance Coordination
+- RFC-P-011 – Recording & Media Capture
 
 ---
 
@@ -595,8 +595,8 @@ Initial accepted version.
 
 > **Relationship to the Core RFCs**
 >
-> RFC-001 establishes who owns authority.
+> RFC-P-001 establishes who owns authority.
 >
-> RFC-002 establishes the domain vocabulary.
+> RFC-P-002 establishes the domain vocabulary.
 >
-> RFC-003 establishes how a Performance progresses through time.
+> RFC-P-003 establishes how a Performance progresses through time.

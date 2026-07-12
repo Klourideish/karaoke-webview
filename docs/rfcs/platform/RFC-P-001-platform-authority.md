@@ -1,4 +1,4 @@
-# RFC-001 – Host Authority
+# RFC-P-001 – Platform Authority
 
 > **Foundational RFC**
 >
@@ -22,11 +22,11 @@
 
 ## Architectural Principle
 
-RFC-001 defines the architectural philosophy of Karaoke Webview.
+RFC-P-001 defines the architectural philosophy of Karaoke Webview.
 
 Future RFCs extend this philosophy by defining additional behaviour, but should not contradict it.
 
-If a future proposal requires changing the host-authority model, that proposal must explicitly supersede RFC-001 following a new Design Review.
+If a future proposal requires changing the host-authority model, that proposal must explicitly supersede RFC-P-001 following a new Design Review.
 
 This requirement exists to preserve architectural stability throughout the lifetime of the project.
 
@@ -68,7 +68,7 @@ External clients communicate with the host through well-defined interfaces witho
 
 # 3. Decisions
 
-## RFC-001.1
+## RFC-P-001.1
 
 ### Decision
 
@@ -80,7 +80,7 @@ A single source of truth ensures deterministic playback, queue progression, scor
 
 ---
 
-## RFC-001.2
+## RFC-P-001.2
 
 ### Decision
 
@@ -92,7 +92,7 @@ Clients may disconnect, reconnect or experience latency. Central authority guara
 
 ---
 
-## RFC-001.3
+## RFC-P-001.3
 
 ### Decision
 
@@ -104,7 +104,7 @@ The host maintains the authoritative playback clock. Clients consume synchronise
 
 ---
 
-## RFC-001.4
+## RFC-P-001.4
 
 ### Decision
 
@@ -116,7 +116,7 @@ Performance creation, preparation, playback, results and history require determi
 
 ---
 
-## RFC-001.5
+## RFC-P-001.5
 
 ### Decision
 
@@ -128,7 +128,7 @@ Audio sources may originate from local devices or future network clients, but ch
 
 ---
 
-## RFC-001.6
+## RFC-P-001.6
 
 ### Decision
 
@@ -140,7 +140,7 @@ Transport technology must remain replaceable without affecting playback, queue m
 
 ---
 
-## RFC-001.7
+## RFC-P-001.7
 
 ### Decision
 
@@ -152,7 +152,7 @@ Normal operation must not depend upon cloud infrastructure or external services.
 
 ---
 
-## RFC-001.8
+## RFC-P-001.8
 
 ### Decision
 
@@ -258,14 +258,14 @@ This architecture intentionally does **not** support:
 
 This RFC is extended by:
 
-- RFC-002 – Domain Model
-- RFC-003 – Performance Lifecycle
-- RFC-004 – Karaoke Modes
-- RFC-005 – Profile & Identity
-- RFC-006 – History & Leaderboards
-- RFC-007 – Microphone Lifecycle
-- RFC-009 – Protocol & Connection State Machine
-- RFC-010 – Scoring Pipeline
+- RFC-P-002 – Platform Domain Model
+- RFC-P-003 – Performance Lifecycle
+- RFC-P-004 – Karaoke Modes
+- RFC-P-012 – Profile & Identity
+- RFC-P-013 – History & Leaderboards
+- RFC-P-005 – Microphone Resource Model
+- RFC-P-008 – Protocol & Connection State Machine
+- RFC-P-009 – Scoring Pipeline
 
 ---
 

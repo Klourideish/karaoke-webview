@@ -1,4 +1,4 @@
-# RFC-002 – Domain Model
+# RFC-P-002 – Platform Domain Model
 
 **Status:** Accepted
 
@@ -40,13 +40,13 @@ These include:
 
 Without a shared vocabulary, different subsystems may begin referring to the same concept using different terminology, creating ambiguity and unnecessary complexity.
 
-RFC-002 establishes a single authoritative language for the project.
+RFC-P-002 establishes a single authoritative language for the project.
 
 ---
 
 # 3. Decisions
 
-## RFC-002.1
+## RFC-P-002.1
 
 ### Decision
 
@@ -58,7 +58,7 @@ All active singers, performances, queue items, connected clients and microphone 
 
 ---
 
-## RFC-002.2
+## RFC-P-002.2
 
 ### Decision
 
@@ -70,7 +70,7 @@ A singer is a real-world participant rather than a UI object or network connecti
 
 ---
 
-## RFC-002.3
+## RFC-P-002.3
 
 ### Decision
 
@@ -82,7 +82,7 @@ Profiles store long-term information such as names, preferences and historical p
 
 ---
 
-## RFC-002.4
+## RFC-P-002.4
 
 ### Decision
 
@@ -94,7 +94,7 @@ Session participation is temporary and should remain independent of persistent p
 
 ---
 
-## RFC-002.5
+## RFC-P-002.5
 
 ### Decision
 
@@ -106,7 +106,7 @@ A client communicates with the host but does not define the physical device on w
 
 ---
 
-## RFC-002.6
+## RFC-P-002.6
 
 ### Decision
 
@@ -118,7 +118,7 @@ Separating Client from Client Device allows reconnects, trusted devices and futu
 
 ---
 
-## RFC-002.7
+## RFC-P-002.7
 
 ### Decision
 
@@ -130,7 +130,7 @@ A queued song is not yet a performance.
 
 ---
 
-## RFC-002.8
+## RFC-P-002.8
 
 ### Decision
 
@@ -142,7 +142,7 @@ Performances are created only when playback begins and become part of permanent 
 
 ---
 
-## RFC-002.9
+## RFC-P-002.9
 
 ### Decision
 
@@ -154,7 +154,7 @@ History should remain immutable after finalisation.
 
 ---
 
-## RFC-002.10
+## RFC-P-002.10
 
 ### Decision
 
@@ -166,7 +166,7 @@ Sources may originate from local devices or future network clients.
 
 ---
 
-## RFC-002.11
+## RFC-P-002.11
 
 ### Decision
 
@@ -178,7 +178,7 @@ Channels provide a consistent abstraction regardless of microphone source.
 
 ---
 
-## RFC-002.12
+## RFC-P-002.12
 
 ### Decision
 
@@ -232,7 +232,7 @@ This should be avoided by extending the existing model where appropriate.
 
 # 6. Dependencies
 
-- RFC-001 – Host Authority
+- RFC-P-001 – Platform Authority
 
 ---
 
@@ -272,12 +272,12 @@ Its purpose is solely to establish the project's shared vocabulary.
 
 This RFC is extended by:
 
-- RFC-003 – Performance Lifecycle
-- RFC-005 – Profile & Identity
-- RFC-006 – History & Leaderboards
-- RFC-007 – Microphone Lifecycle
-- RFC-009 – Protocol & Connection State Machine
-- RFC-010 – Scoring Pipeline
+- RFC-P-003 – Performance Lifecycle
+- RFC-P-012 – Profile & Identity
+- RFC-P-013 – History & Leaderboards
+- RFC-P-005 – Microphone Resource Model
+- RFC-P-008 – Protocol & Connection State Machine
+- RFC-P-009 – Scoring Pipeline
 
 ---
 
@@ -327,10 +327,10 @@ Initial accepted version.
 
 ---
 
-> **Relationship to RFC-001**
+> **Relationship to RFC-P-001**
 >
-> RFC-001 establishes **who owns the system**.
+> RFC-P-001 establishes **who owns the system**.
 >
-> RFC-002 establishes **the language used to describe the system**.
+> RFC-P-002 establishes **the language used to describe the system**.
 >
 > All future RFCs are expected to use the terminology defined here consistently.

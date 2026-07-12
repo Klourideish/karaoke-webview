@@ -1,4 +1,4 @@
-# RFC-008 – Capture Sessions
+# RFC-P-006 – Capture Session Model
 
 > **Authority**
 >
@@ -14,10 +14,10 @@
 >
 > This RFC extends:
 >
-> - RFC-001 – Host Authority
-> - RFC-002 – Domain Model
-> - RFC-003 – Performance Lifecycle
-> - RFC-007 – Microphone Lifecycle
+> - RFC-P-001 – Platform Authority
+> - RFC-P-002 – Platform Domain Model
+> - RFC-P-003 – Performance Lifecycle
+> - RFC-P-005 – Microphone Resource Model
 >
 > These RFCs define the architectural contracts this RFC builds upon.
 >
@@ -27,9 +27,9 @@
 >
 > This RFC is commonly implemented alongside:
 >
-> - RFC-009 – Protocol & Connection State Machine
-> - RFC-010 – Scoring Pipeline
-> - RFC-012 – Recording & Media Capture
+> - RFC-P-008 – Protocol & Connection State Machine
+> - RFC-P-009 – Scoring Pipeline
+> - RFC-P-011 – Recording & Media Capture
 
 **Status:** Accepted
 
@@ -85,7 +85,7 @@ without redefining the microphone architecture.
 
 # 3. Decisions
 
-## RFC-008.1
+## RFC-P-006.1
 
 ### Decision
 
@@ -97,7 +97,7 @@ The Host coordinates capture independently of the underlying microphone channel.
 
 ---
 
-## RFC-008.2
+## RFC-P-006.2
 
 ### Decision
 
@@ -113,7 +113,7 @@ Capture represents temporary stream ownership rather than permanent infrastructu
 
 ---
 
-## RFC-008.3
+## RFC-P-006.3
 
 ### Decision
 
@@ -129,7 +129,7 @@ Different capture purposes require different behaviour while sharing the same ca
 
 ---
 
-## RFC-008.4
+## RFC-P-006.4
 
 ### Decision
 
@@ -163,7 +163,7 @@ Capture requires explicit setup and cleanup independent of microphone discovery.
 
 ---
 
-## RFC-008.5
+## RFC-P-006.5
 
 ### Decision
 
@@ -175,7 +175,7 @@ Multiple independent sessions must not compete for ownership of the same channel
 
 ---
 
-## RFC-008.6
+## RFC-P-006.6
 
 ### Decision
 
@@ -189,7 +189,7 @@ Starting a new diagnostic session automatically stops the previous one.
 
 ---
 
-## RFC-008.7
+## RFC-P-006.7
 
 ### Decision
 
@@ -201,7 +201,7 @@ Party Mode and future multiplayer scenarios require simultaneous capture.
 
 ---
 
-## RFC-008.8
+## RFC-P-006.8
 
 ### Decision
 
@@ -219,7 +219,7 @@ Diagnostic testing exists solely to verify microphone functionality.
 
 ---
 
-## RFC-008.9
+## RFC-P-006.9
 
 ### Decision
 
@@ -235,7 +235,7 @@ Official performances require deterministic ownership.
 
 ---
 
-## RFC-008.10
+## RFC-P-006.10
 
 ### Decision
 
@@ -249,7 +249,7 @@ Only one capture stream should exist for each active microphone channel.
 
 ---
 
-## RFC-008.11
+## RFC-P-006.11
 
 ### Decision
 
@@ -263,7 +263,7 @@ The frontend should visualize capture rather than process raw audio.
 
 ---
 
-## RFC-008.12
+## RFC-P-006.12
 
 ### Decision
 
@@ -275,7 +275,7 @@ Diagnostic capture should never continue invisibly.
 
 ---
 
-## RFC-008.13
+## RFC-P-006.13
 
 ### Decision
 
@@ -287,7 +287,7 @@ Prevent forgotten diagnostic sessions from reserving microphone resources indefi
 
 ---
 
-## RFC-008.14
+## RFC-P-006.14
 
 ### Decision
 
@@ -305,7 +305,7 @@ Capture failures should not destroy microphone identity or assignment.
 
 ---
 
-## RFC-008.15
+## RFC-P-006.15
 
 ### Decision
 
@@ -317,7 +317,7 @@ Terminal sessions remain immutable.
 
 ---
 
-## RFC-008.16
+## RFC-P-006.16
 
 ### Decision
 
@@ -329,7 +329,7 @@ Shared mode provides better compatibility with Windows and other desktop applica
 
 ---
 
-## RFC-008.17
+## RFC-P-006.17
 
 ### Decision
 
@@ -388,10 +388,10 @@ The capture backend should own audio acquisition while downstream systems remain
 
 # 6. Dependencies
 
-- RFC-001 – Host Authority
-- RFC-002 – Domain Model
-- RFC-003 – Performance Lifecycle
-- RFC-007 – Microphone Lifecycle
+- RFC-P-001 – Platform Authority
+- RFC-P-002 – Platform Domain Model
+- RFC-P-003 – Performance Lifecycle
+- RFC-P-005 – Microphone Resource Model
 
 ---
 
@@ -426,9 +426,9 @@ This RFC does not:
 
 This RFC is extended by:
 
-- RFC-009 – Protocol & Connection State Machine
-- RFC-010 – Scoring Pipeline
-- RFC-012 – Recording & Media Capture
+- RFC-P-008 – Protocol & Connection State Machine
+- RFC-P-009 – Scoring Pipeline
+- RFC-P-011 – Recording & Media Capture
 
 ---
 
@@ -482,12 +482,12 @@ Initial accepted version.
 
 > **Relationship to the Core RFCs**
 >
-> RFC-001 defines authority.
+> RFC-P-001 defines authority.
 >
-> RFC-002 defines the domain vocabulary.
+> RFC-P-002 defines the domain vocabulary.
 >
-> RFC-003 defines Performance behaviour.
+> RFC-P-003 defines Performance behaviour.
 >
-> RFC-007 defines microphone infrastructure.
+> RFC-P-005 defines microphone infrastructure.
 >
-> RFC-008 defines how temporary audio capture is coordinated without changing the ownership or lifecycle of microphone resources.
+> RFC-P-006 defines how temporary audio capture is coordinated without changing the ownership or lifecycle of microphone resources.

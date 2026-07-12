@@ -1,4 +1,4 @@
-# RFC-013 – Microphone Assignment & Channel Management
+# RFC-P-007 – Microphone Assignment & Channel Management
 
 > **Authority**
 >
@@ -14,12 +14,12 @@
 >
 > This RFC extends:
 >
-> - RFC-001 – Host Authority
-> - RFC-002 – Domain Model
-> - RFC-003 – Performance Lifecycle
-> - RFC-004 – Karaoke Modes
-> - RFC-007 – Microphone Lifecycle
-> - RFC-008 – Capture Sessions
+> - RFC-P-001 – Platform Authority
+> - RFC-P-002 – Platform Domain Model
+> - RFC-P-003 – Performance Lifecycle
+> - RFC-P-004 – Karaoke Modes
+> - RFC-P-005 – Microphone Resource Model
+> - RFC-P-006 – Capture Session Model
 >
 > These RFCs define the architectural contracts this RFC builds upon.
 >
@@ -29,9 +29,9 @@
 >
 > This RFC is commonly implemented alongside:
 >
-> - RFC-005 – Profile & Identity
-> - RFC-009 – Protocol & Connection State Machine
-> - RFC-010 – Scoring Pipeline
+> - RFC-P-012 – Profile & Identity
+> - RFC-P-008 – Protocol & Connection State Machine
+> - RFC-P-009 – Scoring Pipeline
 
 **Status:** Accepted
 
@@ -87,7 +87,7 @@ allowing each responsibility to evolve independently.
 
 # 3. Decisions
 
-## RFC-013.1
+## RFC-P-007.1
 
 ### Decision
 
@@ -103,7 +103,7 @@ Channels represent active karaoke session infrastructure.
 
 ---
 
-## RFC-013.2
+## RFC-P-007.2
 
 ### Decision
 
@@ -115,7 +115,7 @@ Sources may disconnect or be replaced while preserving logical channel ownership
 
 ---
 
-## RFC-013.3
+## RFC-P-007.3
 
 ### Decision
 
@@ -132,7 +132,7 @@ Assignments should be managed independently of channels and capture.
 
 ---
 
-## RFC-013.4
+## RFC-P-007.4
 
 ### Decision
 
@@ -146,7 +146,7 @@ Future RFCs may extend this behaviour.
 
 ---
 
-## RFC-013.5
+## RFC-P-007.5
 
 ### Decision
 
@@ -158,7 +158,7 @@ Prevent conflicting ownership of the same physical input.
 
 ---
 
-## RFC-013.6
+## RFC-P-007.6
 
 ### Decision
 
@@ -176,7 +176,7 @@ Provides deterministic behaviour while preserving existing assignments.
 
 ---
 
-## RFC-013.7
+## RFC-P-007.7
 
 ### Decision
 
@@ -188,7 +188,7 @@ The host should never unexpectedly remove another singer's microphone.
 
 ---
 
-## RFC-013.8
+## RFC-P-007.8
 
 ### Decision
 
@@ -206,7 +206,7 @@ Manual override remains authoritative.
 
 ---
 
-## RFC-013.9
+## RFC-P-007.9
 
 ### Decision
 
@@ -225,7 +225,7 @@ Live session continuity is more important than permanent persistence.
 
 ---
 
-## RFC-013.10
+## RFC-P-007.10
 
 ### Decision
 
@@ -241,7 +241,7 @@ Temporary hardware failures should not destroy karaoke session state.
 
 ---
 
-## RFC-013.11
+## RFC-P-007.11
 
 ### Decision
 
@@ -258,7 +258,7 @@ Preparation must guarantee required microphone resources exist before playback.
 
 ---
 
-## RFC-013.12
+## RFC-P-007.12
 
 ### Decision
 
@@ -272,7 +272,7 @@ Changing microphone ownership during a performance would invalidate capture cont
 
 ---
 
-## RFC-013.13
+## RFC-P-007.13
 
 ### Decision
 
@@ -286,7 +286,7 @@ Diagnostic testing remains isolated from karaoke session management.
 
 ---
 
-## RFC-013.14
+## RFC-P-007.14
 
 ### Decision
 
@@ -300,7 +300,7 @@ Channels remain reusable host resources.
 
 ---
 
-## RFC-013.15
+## RFC-P-007.15
 
 ### Decision
 
@@ -312,7 +312,7 @@ Unavailable resources should be explicit rather than silently ignored.
 
 ---
 
-## RFC-013.16
+## RFC-P-007.16
 
 ### Decision
 
@@ -364,12 +364,12 @@ Preferences survive between sessions while avoiding stale hardware mappings.
 
 # 6. Dependencies
 
-- RFC-001 – Host Authority
-- RFC-002 – Domain Model
-- RFC-003 – Performance Lifecycle
-- RFC-004 – Karaoke Modes
-- RFC-007 – Microphone Lifecycle
-- RFC-008 – Capture Sessions
+- RFC-P-001 – Platform Authority
+- RFC-P-002 – Platform Domain Model
+- RFC-P-003 – Performance Lifecycle
+- RFC-P-004 – Karaoke Modes
+- RFC-P-005 – Microphone Resource Model
+- RFC-P-006 – Capture Session Model
 
 ---
 
@@ -403,9 +403,9 @@ This RFC does not:
 
 This RFC is extended by:
 
-- RFC-009 – Protocol & Connection State Machine
-- RFC-010 – Scoring Pipeline
-- RFC-012 – Recording & Media Capture
+- RFC-P-008 – Protocol & Connection State Machine
+- RFC-P-009 – Scoring Pipeline
+- RFC-P-011 – Recording & Media Capture
 
 ---
 
@@ -461,16 +461,16 @@ Initial accepted version.
 
 > **Relationship to the Core RFCs**
 >
-> RFC-001 defines authority.
+> RFC-P-001 defines authority.
 >
-> RFC-002 defines the domain vocabulary.
+> RFC-P-002 defines the domain vocabulary.
 >
-> RFC-003 defines Performance behaviour.
+> RFC-P-003 defines Performance behaviour.
 >
-> RFC-004 defines operational karaoke modes.
+> RFC-P-004 defines operational karaoke modes.
 >
-> RFC-007 defines microphone infrastructure.
+> RFC-P-005 defines microphone infrastructure.
 >
-> RFC-008 defines temporary Capture Sessions.
+> RFC-P-006 defines temporary Capture Sessions.
 >
-> RFC-013 defines how host-managed Microphone Channels are created, assigned, recovered and reused throughout a karaoke session.
+> RFC-P-007 defines how host-managed Microphone Channels are created, assigned, recovered and reused throughout a karaoke session.

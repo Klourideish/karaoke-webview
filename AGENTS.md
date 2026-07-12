@@ -62,20 +62,30 @@
 Major architectural changes follow this process:
 
 Design Review
-↓
+
 Draft RFC
-↓
+
 Discussion
-↓
+
 Accepted RFC
-↓
+
 Implementation
-↓
+
 Validation
-↓
+
 Commit
 
 Accepted RFCs are authoritative.
+
+Canonical RFCs live under `docs/rfcs/platform/`, `docs/rfcs/host/`, and `docs/rfcs/android/`.
+
+Use namespaced RFC identifiers such as `RFC-P-001`, `RFC-H-001`, and `RFC-A-001` for new work.
+
+Platform RFCs override Host and Android RFCs when conflicts exist.
+
+Host and Android RFCs extend Platform RFCs and must not redefine Platform contracts.
+
+RFC identifiers are permanent.
 
 Do not silently redesign accepted architecture.
 
@@ -84,3 +94,5 @@ If implementation conflicts with an Accepted RFC:
 1. Stop.
 2. Report the conflict.
 3. Request a Design Review.
+
+Small fixes, styling work, and implementation details do not require RFCs unless they change accepted architecture.
