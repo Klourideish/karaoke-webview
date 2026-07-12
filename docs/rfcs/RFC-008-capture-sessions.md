@@ -52,16 +52,16 @@ Capture Sessions are host-owned runtime objects that coordinate audio capture wi
 Capture Sessions form the single producer of microphone audio within Karaoke Webview. Downstream systems consume the Capture Session rather than independently accessing microphone hardware
 
 MicrophoneSource
-        │
-        ▼
+│
+▼
 MicrophoneChannel
-        │
-        ▼
+│
+▼
 CaptureSession
-        │
-        ├──────────► Meter
-        ├──────────► Scoring
-        └──────────► Recording
+│
+├──────────► Meter
+├──────────► Scoring
+└──────────► Recording
 
 ---
 
