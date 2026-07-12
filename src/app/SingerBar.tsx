@@ -1,7 +1,8 @@
 import { useId } from "react";
+import type { SessionSingerId } from "../host-domain/types";
 
 export type Singer = {
-  id: string;
+  id: SessionSingerId;
   displayName: string;
 };
 

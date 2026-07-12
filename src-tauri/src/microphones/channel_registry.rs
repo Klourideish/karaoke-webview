@@ -21,6 +21,13 @@ impl MicrophoneChannelRegistry {
         lock(&self.inner).channels.clone()
     }
 
+    pub(crate) fn contains(&self, channel_id: &str) -> bool {
+        lock(&self.inner)
+            .channels
+            .iter()
+            .any(|channel| channel.id == channel_id)
+    }
+
     pub(crate) fn create(
         &self,
         source_id: &str,

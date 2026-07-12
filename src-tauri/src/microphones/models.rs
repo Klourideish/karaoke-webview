@@ -38,3 +38,18 @@ pub struct MicrophoneChannel {
     pub source_display_name: String,
     pub state: MicrophoneChannelState,
 }
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum MicrophoneAssignmentMethod {
+    Manual,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrophoneAssignment {
+    pub channel_id: String,
+    pub singer_id: String,
+    pub method: MicrophoneAssignmentMethod,
+    pub sequence: u64,
+}

@@ -1,6 +1,7 @@
 import type { AudioPlayer } from "../audioPlayer";
 import { useMediaLibrary } from "../media-library/useMediaLibrary";
 import { useLocalMicrophones } from "../microphones/useLocalMicrophones";
+import { useMicrophoneAssignments } from "../microphones/useMicrophoneAssignments";
 import { BottomMediaBar } from "../player/BottomMediaBar";
 import { useSongLyrics } from "../useSongLyrics";
 import { LibraryWorkspace } from "../workspaces/LibraryWorkspace";
@@ -36,6 +37,7 @@ export function AppShell({
 }) {
   const lyrics = useSongLyrics(audioPlayer.currentSong);
   const microphones = useLocalMicrophones();
+  const microphoneAssignments = useMicrophoneAssignments(singers);
 
   return (
     <div className="app-shell">
@@ -57,6 +59,8 @@ export function AppShell({
             lyrics={lyrics}
             mediaLibrary={mediaLibrary}
             microphones={microphones}
+            microphoneAssignments={microphoneAssignments}
+            singers={singers}
             view={activeView}
           />
         </main>
@@ -74,12 +78,16 @@ function MainContent({
   lyrics,
   mediaLibrary,
   microphones,
+  microphoneAssignments,
+  singers,
   view,
 }: {
   audioPlayer: AudioPlayer;
   lyrics: ReturnType<typeof useSongLyrics>;
   mediaLibrary: ReturnType<typeof useMediaLibrary>;
   microphones: ReturnType<typeof useLocalMicrophones>;
+  microphoneAssignments: ReturnType<typeof useMicrophoneAssignments>;
+  singers: Singer[];
   view: TabDefinition;
 }) {
   if (view.id === "perform") {
@@ -98,7 +106,13 @@ function MainContent({
   }
 
   if (view.id === "mic") {
-    return <MicrophoneWorkspace discovery={microphones} />;
+    return (
+      <MicrophoneWorkspace
+        assignments={microphoneAssignments}
+        discovery={microphones}
+        singers={singers}
+      />
+    );
   }
 
   return <PlaceholderWorkspace view={view} />;

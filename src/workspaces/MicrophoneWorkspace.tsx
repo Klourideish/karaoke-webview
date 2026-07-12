@@ -1,12 +1,18 @@
 import { useEffect, useId, useMemo, useState } from "react";
+import type { Singer } from "../app/SingerBar";
 import { useDiagnosticCapture } from "../microphones/useDiagnosticCapture";
 import type { useLocalMicrophones } from "../microphones/useLocalMicrophones";
 import { useMicrophoneChannels } from "../microphones/useMicrophoneChannels";
+import type { useMicrophoneAssignments } from "../microphones/useMicrophoneAssignments";
 
 export function MicrophoneWorkspace({
+  assignments,
   discovery,
+  singers,
 }: {
+  assignments: ReturnType<typeof useMicrophoneAssignments>;
   discovery: ReturnType<typeof useLocalMicrophones>;
+  singers: Singer[];
 }) {
   const isLoading = discovery.status === "loading";
   const availableSources = useMemo(
@@ -17,6 +23,10 @@ export function MicrophoneWorkspace({
   const usedSourceIds = useMemo(
     () => new Set(channelRegistry.channels.map((channel) => channel.sourceId)),
     [channelRegistry.channels],
+  );
+  const assignedSingerIds = useMemo(
+    () => new Set(assignments.assignments.map((assignment) => assignment.singerId)),
+    [assignments.assignments],
   );
   const [selectedSourceId, setSelectedSourceId] = useState("");
   const {
@@ -130,6 +140,11 @@ export function MicrophoneWorkspace({
             {channelRegistry.error}
           </p>
         ) : null}
+        {assignments.error ? (
+          <p className="microphone-error" role="alert">
+            {assignments.error}
+          </p>
+        ) : null}
         {channelRegistry.isLoading ? <p>Loading microphone channels...</p> : null}
         {!channelRegistry.isLoading && channelRegistry.channels.length === 0 ? (
           <p>No microphone channels created.</p>
@@ -137,6 +152,12 @@ export function MicrophoneWorkspace({
         {channelRegistry.channels.length > 0 ? (
           <ul className="microphone-source-list" aria-label="Host microphone channels">
             {channelRegistry.channels.map((channel) => {
+              const assignment = assignments.assignments.find(
+                (candidate) => candidate.channelId === channel.id,
+              );
+              const eligibleSingers = singers.filter(
+                (singer) => singer.id === assignment?.singerId || !assignedSingerIds.has(singer.id),
+              );
               const replacementSources = availableSources.filter(
                 (source) => source.id === channel.sourceId || !usedSourceIds.has(source.id),
               );
@@ -149,6 +170,29 @@ export function MicrophoneWorkspace({
                     </p>
                   </div>
                   <div className="microphone-channel-actions">
+                    <label>
+                      Assigned singer
+                      <select
+                        className="microphone-select"
+                        value={assignment?.singerId ?? ""}
+                        disabled={assignments.isLoading || assignments.pendingChannelId !== null}
+                        onChange={(event) => {
+                          const singerId = event.target.value;
+                          if (singerId) {
+                            void assignments.assign(channel.id, singerId);
+                          } else if (assignment) {
+                            void assignments.unassign(channel.id);
+                          }
+                        }}
+                      >
+                        <option value="">Unassigned</option>
+                        {eligibleSingers.map((singer) => (
+                          <option key={singer.id} value={singer.id}>
+                            {singer.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <label>
                       Source
                       <select
@@ -174,11 +218,17 @@ export function MicrophoneWorkspace({
                     <button
                       className="microphone-test-button"
                       type="button"
-                      disabled={channelRegistry.pendingAction !== null}
+                      disabled={channelRegistry.pendingAction !== null || assignment !== undefined}
+                      aria-describedby={assignment ? `${channel.id}-remove-note` : undefined}
                       onClick={() => void channelRegistry.remove(channel.id)}
                     >
                       Remove channel
                     </button>
+                    {assignment ? (
+                      <span id={`${channel.id}-remove-note`} className="microphone-assignment-note">
+                        Unassign before removing
+                      </span>
+                    ) : null}
                   </div>
                 </li>
               );

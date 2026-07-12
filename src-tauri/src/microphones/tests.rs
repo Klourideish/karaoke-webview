@@ -1,10 +1,27 @@
 use super::{
+    assign_persistent_channel,
+    assignment_registry::MicrophoneAssignmentRegistry,
+    channel_registry::MicrophoneChannelRegistry,
     discovery::{
         discover_local_sources, discover_sources_with, map_platform_sources, DiscoveryError,
         PlatformDiscovery, PlatformMicrophoneSource,
     },
-    models::MicrophoneSourceAvailability,
+    models::{DiscoveredMicrophoneSource, MicrophoneSourceAvailability, MicrophoneSourceKind},
+    remove_persistent_channel,
 };
+
+fn discovered_source(
+    id: &str,
+    availability: MicrophoneSourceAvailability,
+) -> DiscoveredMicrophoneSource {
+    DiscoveredMicrophoneSource {
+        id: id.to_string(),
+        display_name: format!("Source {id}"),
+        kind: MicrophoneSourceKind::WindowsDevice,
+        availability,
+        is_default: false,
+    }
+}
 
 fn endpoint(platform_id: &str, display_name: &str, available: bool) -> PlatformMicrophoneSource {
     PlatformMicrophoneSource {
@@ -71,6 +88,66 @@ fn backend_discovery_failure_is_returned_without_sources() {
         result.unwrap_err().to_string(),
         "Could not discover local microphone inputs."
     );
+}
+
+#[test]
+fn assignment_survives_disconnect_recovery_and_source_replacement() {
+    let channels = MicrophoneChannelRegistry::default();
+    let assignments = MicrophoneAssignmentRegistry::default();
+    assignments.sync_session_singers(vec!["singer-1".to_string()]);
+    let sources = [
+        discovered_source("windows-mic-a", MicrophoneSourceAvailability::Available),
+        discovered_source("windows-mic-b", MicrophoneSourceAvailability::Available),
+    ];
+    let channel = channels.create("windows-mic-a", &sources).unwrap();
+    let assignment =
+        assign_persistent_channel(&channels, &assignments, &channel.id, "singer-1").unwrap();
+
+    channels.reconcile(&[]);
+    assert_eq!(assignments.list(), vec![assignment.clone()]);
+
+    channels.reconcile(&sources);
+    channels
+        .replace_source(&channel.id, "windows-mic-b", &sources)
+        .unwrap();
+    assert_eq!(assignments.list(), vec![assignment]);
+}
+
+#[test]
+fn invalid_and_diagnostic_channels_cannot_be_assigned() {
+    let channels = MicrophoneChannelRegistry::default();
+    let assignments = MicrophoneAssignmentRegistry::default();
+    assignments.sync_session_singers(vec!["singer-1".to_string()]);
+
+    for channel_id in ["missing-channel", "diagnostic-channel-windows-mic-a"] {
+        assert_eq!(
+            assign_persistent_channel(&channels, &assignments, channel_id, "singer-1").unwrap_err(),
+            "The selected persistent microphone channel no longer exists."
+        );
+    }
+}
+
+#[test]
+fn assigned_channel_must_be_unassigned_before_removal() {
+    let channels = MicrophoneChannelRegistry::default();
+    let assignments = MicrophoneAssignmentRegistry::default();
+    assignments.sync_session_singers(vec!["singer-1".to_string()]);
+    let sources = [discovered_source(
+        "windows-mic-a",
+        MicrophoneSourceAvailability::Available,
+    )];
+    let channel = channels.create("windows-mic-a", &sources).unwrap();
+    assign_persistent_channel(&channels, &assignments, &channel.id, "singer-1").unwrap();
+
+    assert_eq!(
+        remove_persistent_channel(&channels, &assignments, &channel.id).unwrap_err(),
+        "Unassign this microphone channel before removing it."
+    );
+    assert!(channels.contains(&channel.id));
+
+    assignments.unassign(&channel.id).unwrap();
+    remove_persistent_channel(&channels, &assignments, &channel.id).unwrap();
+    assert!(!channels.contains(&channel.id));
 }
 
 #[cfg(target_os = "windows")]

@@ -140,6 +140,13 @@ const microphoneChannel = {
   state: "available" as const,
 };
 
+const microphoneAssignment = {
+  channelId: "microphone-channel-1",
+  singerId: "singer-1",
+  method: "manual" as const,
+  sequence: 1,
+};
+
 const idleCaptureSnapshot: DiagnosticCaptureSnapshot = {
   status: "idle",
   sessionId: null,
@@ -292,6 +299,10 @@ function mockInvokeWith({
         return Promise.resolve([]);
       }
 
+      if (command === "sync_session_singers" || command === "list_microphone_assignments") {
+        return Promise.resolve([]);
+      }
+
       if (command === "start_diagnostic_capture") {
         return Promise.resolve(activeCaptureSnapshot(args?.sourceId));
       }
@@ -335,6 +346,10 @@ function mockSuccessfulLibraryInvoke(command: string) {
   }
 
   if (command === "list_microphone_channels") {
+    return Promise.resolve([]);
+  }
+
+  if (command === "sync_session_singers" || command === "list_microphone_assignments") {
     return Promise.resolve([]);
   }
 
@@ -686,6 +701,117 @@ describe("Microphone workspace", () => {
 
     expect(
       tauriMocks.invoke.mock.calls.filter(([command]) => command === "create_microphone_channel"),
+    ).toHaveLength(1);
+  });
+
+  it("assigns and unassigns a channel without capture side effects", async () => {
+    tauriMocks.invoke.mockImplementation(
+      (command: string, args?: { channelId?: string; singerId?: string }) => {
+        if (command === "discover_local_microphone_sources") {
+          return Promise.resolve(discoveredMicrophones);
+        }
+        if (command === "list_microphone_channels") {
+          return Promise.resolve([microphoneChannel]);
+        }
+        if (command === "sync_session_singers") {
+          return Promise.resolve([]);
+        }
+        if (command === "assign_microphone_channel") {
+          expect(args).toEqual({ channelId: microphoneChannel.id, singerId: "singer-1" });
+          return Promise.resolve(microphoneAssignment);
+        }
+        if (command === "unassign_microphone_channel") {
+          expect(args).toEqual({ channelId: microphoneChannel.id });
+          return Promise.resolve();
+        }
+        return mockSuccessfulLibraryInvoke(command);
+      },
+    );
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    const assignmentSelect = await screen.findByRole("combobox", { name: "Assigned singer" });
+    await user.selectOptions(assignmentSelect, "singer-1");
+
+    expect(assignmentSelect).toHaveValue("singer-1");
+    expect(screen.getByRole("button", { name: "Remove channel" })).toBeDisabled();
+
+    await user.selectOptions(assignmentSelect, "");
+
+    expect(assignmentSelect).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Remove channel" })).toBeEnabled();
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "start_diagnostic_capture",
+      expect.anything(),
+    );
+  });
+
+  it("reassigns a channel and preserves it across workspace remount", async () => {
+    const reassigned = { ...microphoneAssignment, singerId: "singer-2", sequence: 2 };
+    tauriMocks.invoke.mockImplementation(
+      (command: string, args?: { channelId?: string; singerId?: string }) => {
+        if (command === "discover_local_microphone_sources") {
+          return Promise.resolve(discoveredMicrophones);
+        }
+        if (command === "list_microphone_channels") {
+          return Promise.resolve([microphoneChannel]);
+        }
+        if (command === "sync_session_singers") {
+          return Promise.resolve([microphoneAssignment]);
+        }
+        if (command === "assign_microphone_channel") {
+          expect(args).toEqual({ channelId: microphoneChannel.id, singerId: "singer-2" });
+          return Promise.resolve(reassigned);
+        }
+        return mockSuccessfulLibraryInvoke(command);
+      },
+    );
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Assigned singer" }),
+      "singer-2",
+    );
+    expect(screen.getByRole("combobox", { name: "Assigned singer" })).toHaveValue("singer-2");
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: "Microphones" }));
+
+    expect(await screen.findByRole("combobox", { name: "Assigned singer" })).toHaveValue(
+      "singer-2",
+    );
+  });
+
+  it("does not duplicate explicit assignment in StrictMode", async () => {
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "discover_local_microphone_sources") {
+        return Promise.resolve(discoveredMicrophones);
+      }
+      if (command === "list_microphone_channels") {
+        return Promise.resolve([microphoneChannel]);
+      }
+      if (command === "sync_session_singers") {
+        return Promise.resolve([]);
+      }
+      if (command === "assign_microphone_channel") {
+        return Promise.resolve(microphoneAssignment);
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    const user = userEvent.setup();
+    renderStrictApp();
+
+    await openMicrophoneWorkspace(user);
+    await user.selectOptions(
+      await screen.findByRole("combobox", { name: "Assigned singer" }),
+      "singer-1",
+    );
+
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "assign_microphone_channel"),
     ).toHaveLength(1);
   });
 

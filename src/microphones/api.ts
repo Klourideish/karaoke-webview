@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { LocalMicrophoneChannel, LocalMicrophoneSource } from "./types";
+import type { LocalMicrophoneChannel, LocalMicrophoneSource, MicrophoneAssignment } from "./types";
 
 export function discoverLocalMicrophoneSources(): Promise<LocalMicrophoneSource[]> {
   return invoke<LocalMicrophoneSource[]>("discover_local_microphone_sources");
@@ -25,4 +25,23 @@ export function replaceMicrophoneChannelSource(
     channelId,
     sourceId,
   });
+}
+
+export function syncSessionSingers(singerIds: string[]): Promise<MicrophoneAssignment[]> {
+  return invoke<MicrophoneAssignment[]>("sync_session_singers", { singerIds });
+}
+
+export function listMicrophoneAssignments(): Promise<MicrophoneAssignment[]> {
+  return invoke<MicrophoneAssignment[]>("list_microphone_assignments");
+}
+
+export function assignMicrophoneChannel(
+  channelId: string,
+  singerId: string,
+): Promise<MicrophoneAssignment> {
+  return invoke<MicrophoneAssignment>("assign_microphone_channel", { channelId, singerId });
+}
+
+export function unassignMicrophoneChannel(channelId: string): Promise<void> {
+  return invoke<void>("unassign_microphone_channel", { channelId });
 }
