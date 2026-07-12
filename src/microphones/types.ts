@@ -24,6 +24,19 @@ export type LocalMicrophoneChannel = {
 export type MicrophoneAssignment = {
   channelId: MicrophoneChannelId;
   singerId: SessionSingerId;
-  method: "manual";
+  method: "manual" | "automatic";
   sequence: number;
+};
+
+export type MicrophoneWaitingState = {
+  singerId: SessionSingerId;
+  reason: "no-eligible-microphone";
+  message: string;
+  sequence: number;
+};
+
+export type AutomaticAssignmentResult = {
+  status: "assigned" | "waiting";
+  assignment: MicrophoneAssignment | null;
+  waitingState: MicrophoneWaitingState | null;
 };

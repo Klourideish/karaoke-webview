@@ -146,6 +146,54 @@ export function MicrophoneWorkspace({
           </p>
         ) : null}
         {channelRegistry.isLoading ? <p>Loading microphone channels...</p> : null}
+        <ul className="microphone-source-list" aria-label="Singer microphone status">
+          {singers.map((singer) => {
+            const assignment = assignments.assignments.find(
+              (candidate) => candidate.singerId === singer.id,
+            );
+            const waiting = assignments.waitingStates.find(
+              (candidate) => candidate.singerId === singer.id,
+            );
+            const channel = assignment
+              ? channelRegistry.channels.find((candidate) => candidate.id === assignment.channelId)
+              : null;
+            return (
+              <li className="microphone-source-row" key={singer.id}>
+                <div>
+                  <h4>{singer.displayName}</h4>
+                  <p>
+                    {assignment
+                      ? `${assignment.channelId} · ${channelStateLabel(channel?.state ?? "disconnected")}`
+                      : (waiting?.message ?? "No microphone assigned.")}
+                  </p>
+                </div>
+                <div className="microphone-source-actions">
+                  <button
+                    className="microphone-test-button"
+                    type="button"
+                    disabled={assignment !== undefined || assignments.pendingSingerId !== null}
+                    onClick={async () => {
+                      await assignments.autoAssign(singer.id);
+                      await channelRegistry.refresh();
+                    }}
+                  >
+                    Auto Assign
+                  </button>
+                  {waiting ? (
+                    <button
+                      className="microphone-test-button"
+                      type="button"
+                      disabled={assignments.pendingSingerId !== null}
+                      onClick={() => void assignments.clearWaiting(singer.id)}
+                    >
+                      Clear waiting status
+                    </button>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
         {!channelRegistry.isLoading && channelRegistry.channels.length === 0 ? (
           <p>No microphone channels created.</p>
         ) : null}

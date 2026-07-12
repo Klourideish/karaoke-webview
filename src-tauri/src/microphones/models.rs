@@ -43,6 +43,37 @@ pub struct MicrophoneChannel {
 #[serde(rename_all = "kebab-case")]
 pub enum MicrophoneAssignmentMethod {
     Manual,
+    Automatic,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum MicrophoneWaitingReason {
+    NoEligibleMicrophone,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrophoneWaitingState {
+    pub singer_id: String,
+    pub reason: MicrophoneWaitingReason,
+    pub message: String,
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutomaticAssignmentStatus {
+    Assigned,
+    Waiting,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomaticAssignmentResult {
+    pub status: AutomaticAssignmentStatus,
+    pub assignment: Option<MicrophoneAssignment>,
+    pub waiting_state: Option<MicrophoneWaitingState>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

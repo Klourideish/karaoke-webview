@@ -28,6 +28,14 @@ impl MicrophoneChannelRegistry {
             .any(|channel| channel.id == channel_id)
     }
 
+    pub(crate) fn get(&self, channel_id: &str) -> Option<MicrophoneChannel> {
+        lock(&self.inner)
+            .channels
+            .iter()
+            .find(|channel| channel.id == channel_id)
+            .cloned()
+    }
+
     pub(crate) fn create(
         &self,
         source_id: &str,
