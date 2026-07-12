@@ -1,5 +1,8 @@
 use std::{
-    sync::{mpsc, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc,
+    },
     time::Duration,
 };
 
@@ -19,6 +22,30 @@ enum FakeBehavior {
 
 struct FakeBackend {
     behavior: FakeBehavior,
+}
+
+#[derive(Default)]
+struct CountingBackend {
+    active_workers: AtomicUsize,
+    maximum_workers: AtomicUsize,
+}
+
+impl CaptureBackend for CountingBackend {
+    fn run(
+        &self,
+        _source_id: &str,
+        stop: mpsc::Receiver<()>,
+        ready: mpsc::Sender<Result<(), String>>,
+        _levels: Box<dyn Fn(MicrophoneLevelSnapshot) + Send>,
+        _timeout: Duration,
+    ) -> Result<CaptureEnd, String> {
+        let active = self.active_workers.fetch_add(1, Ordering::SeqCst) + 1;
+        self.maximum_workers.fetch_max(active, Ordering::SeqCst);
+        let _ = ready.send(Ok(()));
+        let _ = stop.recv();
+        self.active_workers.fetch_sub(1, Ordering::SeqCst);
+        Ok(CaptureEnd::Stopped)
+    }
 }
 
 impl CaptureBackend for FakeBackend {
@@ -97,6 +124,26 @@ fn starting_another_diagnostic_session_replaces_the_previous_one() {
 }
 
 #[test]
+fn concurrent_starts_never_overlap_capture_workers() {
+    let backend = Arc::new(CountingBackend::default());
+    let manager = Arc::new(DiagnosticCaptureManager::with_test_backend(
+        backend.clone(),
+        Duration::from_secs(1),
+    ));
+
+    std::thread::scope(|scope| {
+        let first_manager = Arc::clone(&manager);
+        scope.spawn(move || first_manager.start("windows-mic-a".to_string()));
+        let second_manager = Arc::clone(&manager);
+        scope.spawn(move || second_manager.start("windows-mic-b".to_string()));
+    });
+
+    assert_eq!(backend.maximum_workers.load(Ordering::SeqCst), 1);
+    assert_eq!(manager.snapshot().status, DiagnosticCaptureStatus::Active);
+    manager.stop();
+}
+
+#[test]
 fn diagnostic_session_stops_after_its_timeout() {
     let manager = manager(FakeBehavior::Timeout, Duration::from_millis(10));
 
@@ -140,6 +187,16 @@ fn normalized_levels_are_idle_for_empty_samples() {
     assert_eq!(level.rms, 0.0);
     assert_eq!(level.peak, 0.0);
     assert!(!level.clipping);
+}
+
+#[test]
+fn normalized_levels_ignore_non_finite_samples_and_remain_bounded() {
+    let level = normalized_levels(&[f32::NAN, f32::INFINITY, -2.0, 2.0], 5);
+
+    assert_eq!(level.rms, 1.0);
+    assert_eq!(level.peak, 1.0);
+    assert!(level.clipping);
+    assert!(level.rms.is_finite());
 }
 
 #[cfg(target_os = "windows")]

@@ -691,6 +691,63 @@ describe("Microphone workspace", () => {
     expect(screen.getByText("State: Idle")).toBeInTheDocument();
   });
 
+  it("ignores a stale level snapshot after the session stops", async () => {
+    vi.useFakeTimers();
+    const pendingSnapshot = createDeferred<DiagnosticCaptureSnapshot>();
+    tauriMocks.invoke.mockImplementation((command: string, args?: { sourceId?: string }) => {
+      if (command === "discover_local_microphone_sources") {
+        return Promise.resolve(discoveredMicrophones);
+      }
+      if (command === "start_diagnostic_capture") {
+        return Promise.resolve(activeCaptureSnapshot(args?.sourceId));
+      }
+      if (command === "diagnostic_capture_snapshot") {
+        return pendingSnapshot.promise;
+      }
+      if (command === "stop_diagnostic_capture") {
+        return Promise.resolve(idleCaptureSnapshot);
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    render(<App />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Microphones" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start Test" }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(DIAGNOSTIC_LEVEL_POLL_INTERVAL_MS);
+      await Promise.resolve();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop Test" }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    pendingSnapshot.resolve(
+      activeCaptureSnapshot("windows-mic-primary", {
+        rms: 0.8,
+        peak: 0.9,
+        clipping: false,
+        sequence: 9,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("State: Idle")).toBeInTheDocument();
+    expect(screen.getByRole("meter", { name: "RMS level" })).toHaveAttribute("aria-valuenow", "0");
+  });
+
   it("stops active capture before changing microphone selection", async () => {
     tauriMocks.invoke.mockImplementation((command: string, args?: { sourceId?: string }) => {
       if (command === "discover_local_microphone_sources") {

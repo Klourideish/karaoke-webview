@@ -34,6 +34,7 @@ struct ManagerInner {
 }
 
 pub(crate) struct DiagnosticCaptureManager {
+    operations: Mutex<()>,
     inner: Arc<Mutex<ManagerInner>>,
     backend: Arc<dyn CaptureBackend>,
     next_session: AtomicU64,
@@ -55,6 +56,7 @@ impl DiagnosticCaptureManager {
 
     fn with_backend(backend: Arc<dyn CaptureBackend>, session_timeout: Duration) -> Self {
         Self {
+            operations: Mutex::new(()),
             inner: Arc::new(Mutex::new(ManagerInner {
                 channels: HashMap::new(),
                 active: None,
@@ -71,7 +73,8 @@ impl DiagnosticCaptureManager {
     }
 
     pub(crate) fn start(&self, source_id: String) -> DiagnosticCaptureSnapshot {
-        self.stop();
+        let _operation = lock_mutex(&self.operations);
+        self.stop_locked();
 
         let session_number = self.next_session.fetch_add(1, Ordering::Relaxed);
         let session_id = format!("diagnostic-capture-{session_number}");
@@ -170,6 +173,11 @@ impl DiagnosticCaptureManager {
     }
 
     pub(crate) fn stop(&self) -> DiagnosticCaptureSnapshot {
+        let _operation = lock_mutex(&self.operations);
+        self.stop_locked()
+    }
+
+    fn stop_locked(&self) -> DiagnosticCaptureSnapshot {
         {
             let mut inner = lock_inner(&self.inner);
             if inner.active.is_none() {
@@ -228,6 +236,12 @@ impl Drop for DiagnosticCaptureManager {
 
 fn lock_inner(inner: &Arc<Mutex<ManagerInner>>) -> std::sync::MutexGuard<'_, ManagerInner> {
     inner
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn lock_mutex<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }

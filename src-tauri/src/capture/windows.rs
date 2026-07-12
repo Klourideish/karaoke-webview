@@ -240,16 +240,35 @@ impl AudioFormat {
             _ => return Err("The microphone mix format is not supported yet.".to_string()),
         };
 
-        Ok(Self {
+        let format = Self {
             channels: basic.nChannels,
             block_align: basic.nBlockAlign,
             bits_per_sample: basic.wBitsPerSample,
             encoding,
-        })
+        };
+        format.validate()?;
+        Ok(format)
+    }
+
+    fn validate(self) -> Result<(), String> {
+        let supported_bits = matches!(
+            (self.encoding, self.bits_per_sample),
+            (SampleEncoding::Float, 32) | (SampleEncoding::Pcm, 16 | 24 | 32)
+        );
+        let bytes_per_sample = self.bits_per_sample.checked_div(8).unwrap_or(0);
+        let expected_block_align = self.channels.checked_mul(bytes_per_sample);
+        if self.channels == 0
+            || self.bits_per_sample % 8 != 0
+            || !supported_bits
+            || expected_block_align != Some(self.block_align)
+        {
+            return Err("The microphone uses an unsupported sample layout.".to_string());
+        }
+        Ok(())
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SampleEncoding {
     Float,
     Pcm,
@@ -277,4 +296,40 @@ impl Drop for MixFormat {
 fn capture_error(context: &'static str, error: impl std::fmt::Display) -> String {
     eprintln!("{context} {error}");
     context.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_samples, AudioFormat, SampleEncoding};
+
+    #[test]
+    fn rejects_inconsistent_native_sample_layouts() {
+        let format = AudioFormat {
+            channels: 2,
+            block_align: 4,
+            bits_per_sample: 24,
+            encoding: SampleEncoding::Pcm,
+        };
+
+        assert_eq!(
+            format.validate(),
+            Err("The microphone uses an unsupported sample layout.".to_string())
+        );
+    }
+
+    #[test]
+    fn decodes_interleaved_pcm_channels_without_extra_copies() {
+        let bytes = [0x00, 0x40, 0x00, 0xc0];
+        let format = AudioFormat {
+            channels: 2,
+            block_align: 4,
+            bits_per_sample: 16,
+            encoding: SampleEncoding::Pcm,
+        };
+        let mut output = Vec::new();
+
+        decode_samples(bytes.as_ptr(), 1, format, &mut output).unwrap();
+
+        assert_eq!(output, vec![0.5, -0.5]);
+    }
 }
