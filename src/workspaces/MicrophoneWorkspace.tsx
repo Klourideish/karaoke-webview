@@ -4,6 +4,7 @@ import { useDiagnosticCapture } from "../microphones/useDiagnosticCapture";
 import type { useLocalMicrophones } from "../microphones/useLocalMicrophones";
 import { useMicrophoneChannels } from "../microphones/useMicrophoneChannels";
 import type { useMicrophoneAssignments } from "../microphones/useMicrophoneAssignments";
+import { useMicrophoneRecovery } from "../microphones/useMicrophoneRecovery";
 
 export function MicrophoneWorkspace({
   assignments,
@@ -20,6 +21,7 @@ export function MicrophoneWorkspace({
     [discovery.sources],
   );
   const channelRegistry = useMicrophoneChannels(discovery.sources);
+  const recovery = useMicrophoneRecovery(discovery.sources, channelRegistry.channels);
   const usedSourceIds = useMemo(
     () => new Set(channelRegistry.channels.map((channel) => channel.sourceId)),
     [channelRegistry.channels],
@@ -145,6 +147,11 @@ export function MicrophoneWorkspace({
             {assignments.error}
           </p>
         ) : null}
+        {recovery.error ? (
+          <p className="microphone-error" role="alert">
+            {recovery.error}
+          </p>
+        ) : null}
         {channelRegistry.isLoading ? <p>Loading microphone channels...</p> : null}
         <ul className="microphone-source-list" aria-label="Singer microphone status">
           {singers.map((singer) => {
@@ -206,9 +213,15 @@ export function MicrophoneWorkspace({
               const eligibleSingers = singers.filter(
                 (singer) => singer.id === assignment?.singerId || !assignedSingerIds.has(singer.id),
               );
-              const replacementSources = availableSources.filter(
-                (source) => source.id === channel.sourceId || !usedSourceIds.has(source.id),
+              const recoveryState = recovery.states.find(
+                (candidate) => candidate.channelId === channel.id,
               );
+              const replacementSources = availableSources.filter((source) => {
+                if (channel.state === "disconnected") {
+                  return recoveryState?.eligibleReplacementSourceIds.includes(source.id) ?? false;
+                }
+                return source.id === channel.sourceId || !usedSourceIds.has(source.id);
+              });
               return (
                 <li className="microphone-source-row" key={channel.id}>
                   <div>
@@ -216,8 +229,37 @@ export function MicrophoneWorkspace({
                     <p>
                       {channel.sourceDisplayName} · {channelStateLabel(channel.state)}
                     </p>
+                    {recoveryState ? (
+                      <p>
+                        Recovery: {recoveryStatusLabel(recoveryState.status)} ·{" "}
+                        {recoveryState.reason}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="microphone-channel-actions">
+                    {channel.state === "disconnected" ? (
+                      <>
+                        <button
+                          className="microphone-test-button"
+                          type="button"
+                          disabled={recovery.pendingChannelId !== null}
+                          onClick={async () => {
+                            await recovery.retry(channel.id);
+                            await channelRegistry.refresh();
+                          }}
+                        >
+                          Retry original source
+                        </button>
+                        <button
+                          className="microphone-test-button"
+                          type="button"
+                          disabled={recovery.pendingChannelId !== null}
+                          onClick={() => void recovery.leaveAssigned(channel.id)}
+                        >
+                          Leave assigned
+                        </button>
+                      </>
+                    ) : null}
                     <label>
                       Assigned singer
                       <select
@@ -242,19 +284,31 @@ export function MicrophoneWorkspace({
                       </select>
                     </label>
                     <label>
-                      Source
+                      {channel.state === "disconnected" ? "Replace source" : "Source"}
                       <select
                         className="microphone-select"
-                        value={channel.sourceId}
+                        value={
+                          replacementSources.some((source) => source.id === channel.sourceId)
+                            ? channel.sourceId
+                            : ""
+                        }
                         disabled={
                           channelRegistry.pendingAction !== null || replacementSources.length === 0
                         }
-                        onChange={(event) =>
-                          void channelRegistry.replaceSource(channel.id, event.target.value)
-                        }
+                        onChange={async (event) => {
+                          if (channel.state === "disconnected") {
+                            await channelRegistry.replaceDisconnectedSource(
+                              channel.id,
+                              event.target.value,
+                            );
+                            await recovery.refresh();
+                          } else {
+                            await channelRegistry.replaceSource(channel.id, event.target.value);
+                          }
+                        }}
                       >
-                        {!replacementSources.some((source) => source.id === channel.sourceId) ? (
-                          <option value={channel.sourceId}>{channel.sourceDisplayName}</option>
+                        {channel.state === "disconnected" ? (
+                          <option value="">Choose eligible source</option>
                         ) : null}
                         {replacementSources.map((source) => (
                           <option key={source.id} value={source.id}>
@@ -270,7 +324,7 @@ export function MicrophoneWorkspace({
                       aria-describedby={assignment ? `${channel.id}-remove-note` : undefined}
                       onClick={() => void channelRegistry.remove(channel.id)}
                     >
-                      Remove channel
+                      Release channel
                     </button>
                     {assignment ? (
                       <span id={`${channel.id}-remove-note`} className="microphone-assignment-note">
@@ -374,4 +428,13 @@ function captureStatusLabel(status: string) {
 
 function channelStateLabel(state: "available" | "disconnected") {
   return state === "available" ? "Available" : "Disconnected";
+}
+
+function recoveryStatusLabel(
+  status: "healthy" | "disconnected" | "recovering" | "replacement-available" | "recovery-failed",
+) {
+  return status
+    .split("-")
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 }

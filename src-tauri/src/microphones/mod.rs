@@ -3,6 +3,7 @@ mod automatic_assignment;
 mod channel_registry;
 mod discovery;
 mod models;
+mod recovery;
 
 #[cfg(test)]
 mod tests;
@@ -14,8 +15,10 @@ pub(crate) use assignment_registry::MicrophoneAssignmentRegistry;
 pub(crate) use channel_registry::MicrophoneChannelRegistry;
 pub(crate) use models::DiscoveredMicrophoneSource;
 use models::{
-    AutomaticAssignmentResult, MicrophoneAssignment, MicrophoneChannel, MicrophoneWaitingState,
+    AutomaticAssignmentResult, MicrophoneAssignment, MicrophoneChannel, MicrophoneRecoveryState,
+    MicrophoneWaitingState,
 };
+pub(crate) use recovery::MicrophoneRecoveryRegistry;
 use std::sync::{Mutex, MutexGuard};
 
 #[derive(Default)]
@@ -57,9 +60,13 @@ pub(crate) fn first_available_local_source_id() -> Result<Option<String>, String
 #[tauri::command]
 pub(crate) fn discover_local_microphone_sources(
     registry: tauri::State<'_, MicrophoneChannelRegistry>,
+    recovery: tauri::State<'_, MicrophoneRecoveryRegistry>,
+    operations: tauri::State<'_, MicrophoneRegistryOperations>,
 ) -> Result<Vec<DiscoveredMicrophoneSource>, String> {
+    let _operation = operations.lock();
     let sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
     registry.reconcile(&sources);
+    recovery.reconcile(&sources, &registry.list());
     Ok(sources)
 }
 
@@ -84,10 +91,13 @@ pub(crate) fn remove_microphone_channel(
     channel_id: String,
     registry: tauri::State<'_, MicrophoneChannelRegistry>,
     assignments: tauri::State<'_, MicrophoneAssignmentRegistry>,
+    recovery: tauri::State<'_, MicrophoneRecoveryRegistry>,
     operations: tauri::State<'_, MicrophoneRegistryOperations>,
 ) -> Result<(), String> {
     let _operation = operations.lock();
-    remove_persistent_channel(&registry, &assignments, &channel_id)
+    remove_persistent_channel(&registry, &assignments, &channel_id)?;
+    recovery.clear_channel(&channel_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -209,4 +219,96 @@ pub(crate) fn clear_microphone_waiting_state(
         return Err("The selected session singer no longer exists.".to_string());
     }
     assignments.clear_waiting(&singer_id)
+}
+
+#[tauri::command]
+pub(crate) fn get_microphone_recovery_states(
+    channels: tauri::State<'_, MicrophoneChannelRegistry>,
+    recovery: tauri::State<'_, MicrophoneRecoveryRegistry>,
+    operations: tauri::State<'_, MicrophoneRegistryOperations>,
+) -> Result<Vec<MicrophoneRecoveryState>, String> {
+    let _operation = operations.lock();
+    let sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
+    channels.reconcile(&sources);
+    recovery.reconcile(&sources, &channels.list());
+    Ok(recovery.list())
+}
+
+#[tauri::command]
+pub(crate) fn retry_microphone_channel_source(
+    channel_id: String,
+    channels: tauri::State<'_, MicrophoneChannelRegistry>,
+    recovery: tauri::State<'_, MicrophoneRecoveryRegistry>,
+    operations: tauri::State<'_, MicrophoneRegistryOperations>,
+) -> Result<MicrophoneRecoveryState, String> {
+    let _operation = operations.lock();
+    require_persistent_channel(&channels, &channel_id)?;
+    if recovery.get(&channel_id).is_none() {
+        let initial_sources =
+            discovery::discover_local_sources().map_err(|error| error.to_string())?;
+        channels.reconcile(&initial_sources);
+        recovery.reconcile(&initial_sources, &channels.list());
+    }
+    recovery.mark_recovering(&channel_id)?;
+    let sources = match discovery::discover_local_sources() {
+        Ok(sources) => sources,
+        Err(error) => {
+            recovery.mark_discovery_failed(&channel_id)?;
+            return Err(error.to_string());
+        }
+    };
+    channels.reconcile(&sources);
+    recovery.reconcile(&sources, &channels.list());
+    let state = recovery
+        .get(&channel_id)
+        .ok_or_else(|| "The microphone recovery state no longer exists.".to_string())?;
+    if state.status == models::MicrophoneRecoveryStatus::Healthy {
+        Ok(state)
+    } else {
+        recovery.mark_retry_failed(&channel_id)
+    }
+}
+
+#[tauri::command]
+pub(crate) fn replace_disconnected_microphone_channel_source(
+    channel_id: String,
+    source_id: String,
+    channels: tauri::State<'_, MicrophoneChannelRegistry>,
+    recovery: tauri::State<'_, MicrophoneRecoveryRegistry>,
+    operations: tauri::State<'_, MicrophoneRegistryOperations>,
+) -> Result<MicrophoneChannel, String> {
+    let _operation = operations.lock();
+    require_persistent_channel(&channels, &channel_id)?;
+    let sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
+    channels.reconcile(&sources);
+    recovery.reconcile(&sources, &channels.list());
+    let state = recovery
+        .get(&channel_id)
+        .ok_or_else(|| "The microphone recovery state no longer exists.".to_string())?;
+    if state.status == models::MicrophoneRecoveryStatus::Healthy {
+        return Err("This microphone channel is already healthy.".to_string());
+    }
+    if !state
+        .eligible_replacement_source_ids
+        .iter()
+        .any(|eligible| eligible == &source_id)
+    {
+        return Err("The selected replacement source is not eligible.".to_string());
+    }
+    let channel = channels.replace_source(&channel_id, &source_id, &sources)?;
+    recovery.clear_channel(&channel_id);
+    recovery.reconcile(&sources, &channels.list());
+    Ok(channel)
+}
+
+#[tauri::command]
+pub(crate) fn leave_microphone_channel_assigned(
+    channel_id: String,
+    channels: tauri::State<'_, MicrophoneChannelRegistry>,
+    recovery: tauri::State<'_, MicrophoneRecoveryRegistry>,
+    operations: tauri::State<'_, MicrophoneRegistryOperations>,
+) -> Result<MicrophoneRecoveryState, String> {
+    let _operation = operations.lock();
+    require_persistent_channel(&channels, &channel_id)?;
+    recovery.leave_assigned(&channel_id)
 }

@@ -4,6 +4,7 @@ import type {
   LocalMicrophoneChannel,
   LocalMicrophoneSource,
   MicrophoneAssignment,
+  MicrophoneRecoveryState,
   MicrophoneWaitingState,
 } from "./types";
 
@@ -62,4 +63,28 @@ export function listMicrophoneWaitingStates(): Promise<MicrophoneWaitingState[]>
 
 export function clearMicrophoneWaitingState(singerId: string): Promise<void> {
   return invoke<void>("clear_microphone_waiting_state", { singerId });
+}
+
+export function getMicrophoneRecoveryStates(): Promise<MicrophoneRecoveryState[]> {
+  return invoke<MicrophoneRecoveryState[]>("get_microphone_recovery_states");
+}
+
+export function retryMicrophoneChannelSource(channelId: string): Promise<MicrophoneRecoveryState> {
+  return invoke<MicrophoneRecoveryState>("retry_microphone_channel_source", { channelId });
+}
+
+export function replaceDisconnectedMicrophoneChannelSource(
+  channelId: string,
+  sourceId: string,
+): Promise<LocalMicrophoneChannel> {
+  return invoke<LocalMicrophoneChannel>("replace_disconnected_microphone_channel_source", {
+    channelId,
+    sourceId,
+  });
+}
+
+export function leaveMicrophoneChannelAssigned(
+  channelId: string,
+): Promise<MicrophoneRecoveryState> {
+  return invoke<MicrophoneRecoveryState>("leave_microphone_channel_assigned", { channelId });
 }

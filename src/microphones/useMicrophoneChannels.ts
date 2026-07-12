@@ -3,6 +3,7 @@ import {
   createMicrophoneChannel,
   listMicrophoneChannels,
   removeMicrophoneChannel,
+  replaceDisconnectedMicrophoneChannelSource,
   replaceMicrophoneChannelSource,
 } from "./api";
 import type { LocalMicrophoneChannel, LocalMicrophoneSource } from "./types";
@@ -118,5 +119,40 @@ export function useMicrophoneChannels(discoveredSources: readonly LocalMicrophon
     }
   }, []);
 
-  return { channels, create, error, isLoading, pendingAction, refresh, remove, replaceSource };
+  const replaceDisconnectedSource = useCallback(async (channelId: string, sourceId: string) => {
+    const requestVersion = ++requestVersionRef.current;
+    setPendingAction(`recover:${channelId}`);
+    setError(null);
+    try {
+      const replaced = await replaceDisconnectedMicrophoneChannelSource(channelId, sourceId);
+      if (requestVersionRef.current === requestVersion) {
+        setChannels((current) =>
+          current.map((channel) => (channel.id === channelId ? replaced : channel)),
+        );
+      }
+      return replaced;
+    } catch (cause) {
+      console.error("Disconnected microphone channel source could not be replaced.", cause);
+      if (requestVersionRef.current === requestVersion) {
+        setError("Could not replace the disconnected microphone source.");
+      }
+      return null;
+    } finally {
+      if (requestVersionRef.current === requestVersion) {
+        setPendingAction(null);
+      }
+    }
+  }, []);
+
+  return {
+    channels,
+    create,
+    error,
+    isLoading,
+    pendingAction,
+    refresh,
+    remove,
+    replaceDisconnectedSource,
+    replaceSource,
+  };
 }

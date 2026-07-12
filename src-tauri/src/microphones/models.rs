@@ -77,6 +77,35 @@ pub struct AutomaticAssignmentResult {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum MicrophoneSourcePresence {
+    Available,
+    Unavailable,
+    Missing,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum MicrophoneRecoveryStatus {
+    Healthy,
+    Disconnected,
+    Recovering,
+    ReplacementAvailable,
+    RecoveryFailed,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrophoneRecoveryState {
+    pub channel_id: String,
+    pub status: MicrophoneRecoveryStatus,
+    pub source_presence: MicrophoneSourcePresence,
+    pub reason: String,
+    pub eligible_replacement_source_ids: Vec<String>,
+    pub automatic_replacement_eligible: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MicrophoneAssignment {
     pub channel_id: String,

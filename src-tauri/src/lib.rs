@@ -9,6 +9,7 @@ pub fn run() {
         .manage(capture::DiagnosticCaptureManager::new())
         .manage(microphones::MicrophoneAssignmentRegistry::default())
         .manage(microphones::MicrophoneChannelRegistry::default())
+        .manage(microphones::MicrophoneRecoveryRegistry::default())
         .manage(microphones::MicrophoneRegistryOperations::default())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -23,6 +24,8 @@ pub fn run() {
             media_library::load_library_settings,
             microphones::create_microphone_channel,
             microphones::discover_local_microphone_sources,
+            microphones::get_microphone_recovery_states,
+            microphones::leave_microphone_channel_assigned,
             microphones::list_microphone_channels,
             microphones::list_microphone_assignments,
             microphones::list_microphone_waiting_states,
@@ -30,6 +33,8 @@ pub fn run() {
             media_library::resolve_audio_source,
             microphones::remove_microphone_channel,
             microphones::replace_microphone_channel_source,
+            microphones::replace_disconnected_microphone_channel_source,
+            microphones::retry_microphone_channel_source,
             media_library::save_library_index,
             media_library::save_library_root,
             media_library::scan_media_library,

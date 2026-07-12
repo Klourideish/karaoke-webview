@@ -40,3 +40,12 @@ export type AutomaticAssignmentResult = {
   assignment: MicrophoneAssignment | null;
   waitingState: MicrophoneWaitingState | null;
 };
+
+export type MicrophoneRecoveryState = {
+  channelId: MicrophoneChannelId;
+  status: "healthy" | "disconnected" | "recovering" | "replacement-available" | "recovery-failed";
+  sourcePresence: "available" | "unavailable" | "missing";
+  reason: string;
+  eligibleReplacementSourceIds: MicrophoneSourceId[];
+  automaticReplacementEligible: boolean;
+};
