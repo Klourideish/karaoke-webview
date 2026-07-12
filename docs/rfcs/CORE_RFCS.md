@@ -45,3 +45,14 @@ Together these four RFCs establish the architectural foundation of Karaoke Webvi
 Future RFCs are expected to extend these documents rather than redefine them.
 
 Changes to these Core RFCs should be rare and should only occur following a successful Design Review.
+
+## Reserved RFC Numbers
+
+The following RFC numbers are intentionally reserved for future architectural work:
+
+- RFC-009 – Protocol & Connection State Machine
+- RFC-010 – Scoring Pipeline
+- RFC-011 – Battle Performance Coordination
+- RFC-012 – Recording & Media Capture
+
+RFC numbers are stable architectural identifiers and are not reassigned based on implementation order.
