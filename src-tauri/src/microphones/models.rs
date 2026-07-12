@@ -22,3 +22,19 @@ pub struct DiscoveredMicrophoneSource {
     pub availability: MicrophoneSourceAvailability,
     pub is_default: bool,
 }
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum MicrophoneChannelState {
+    Available,
+    Disconnected,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrophoneChannel {
+    pub id: String,
+    pub source_id: String,
+    pub source_display_name: String,
+    pub state: MicrophoneChannelState,
+}

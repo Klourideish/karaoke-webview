@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { useDiagnosticCapture } from "../microphones/useDiagnosticCapture";
 import type { useLocalMicrophones } from "../microphones/useLocalMicrophones";
+import { useMicrophoneChannels } from "../microphones/useMicrophoneChannels";
 
 export function MicrophoneWorkspace({
   discovery,
@@ -11,6 +12,11 @@ export function MicrophoneWorkspace({
   const availableSources = useMemo(
     () => discovery.sources.filter((source) => source.availability === "available"),
     [discovery.sources],
+  );
+  const channelRegistry = useMicrophoneChannels(discovery.sources);
+  const usedSourceIds = useMemo(
+    () => new Set(channelRegistry.channels.map((channel) => channel.sourceId)),
+    [channelRegistry.channels],
   );
   const [selectedSourceId, setSelectedSourceId] = useState("");
   const {
@@ -96,13 +102,90 @@ export function MicrophoneWorkspace({
                 <h3>{source.displayName}</h3>
                 <p>Available</p>
               </div>
-              {source.isDefault ? (
-                <span className="microphone-default-label">Default input</span>
-              ) : null}
+              <div className="microphone-source-actions">
+                {source.isDefault ? (
+                  <span className="microphone-default-label">Default input</span>
+                ) : null}
+                <button
+                  className="microphone-test-button"
+                  type="button"
+                  disabled={usedSourceIds.has(source.id) || channelRegistry.pendingAction !== null}
+                  onClick={() => void channelRegistry.create(source.id)}
+                >
+                  {usedSourceIds.has(source.id) ? "Channel created" : "Create channel"}
+                </button>
+              </div>
             </li>
           ))}
         </ul>
       ) : null}
+
+      <section className="microphone-channel-section" aria-labelledby="microphone-channels-heading">
+        <div>
+          <p className="region-label">Host session infrastructure</p>
+          <h3 id="microphone-channels-heading">Microphone channels</h3>
+        </div>
+        {channelRegistry.error ? (
+          <p className="microphone-error" role="alert">
+            {channelRegistry.error}
+          </p>
+        ) : null}
+        {channelRegistry.isLoading ? <p>Loading microphone channels...</p> : null}
+        {!channelRegistry.isLoading && channelRegistry.channels.length === 0 ? (
+          <p>No microphone channels created.</p>
+        ) : null}
+        {channelRegistry.channels.length > 0 ? (
+          <ul className="microphone-source-list" aria-label="Host microphone channels">
+            {channelRegistry.channels.map((channel) => {
+              const replacementSources = availableSources.filter(
+                (source) => source.id === channel.sourceId || !usedSourceIds.has(source.id),
+              );
+              return (
+                <li className="microphone-source-row" key={channel.id}>
+                  <div>
+                    <h4>{channel.id}</h4>
+                    <p>
+                      {channel.sourceDisplayName} · {channelStateLabel(channel.state)}
+                    </p>
+                  </div>
+                  <div className="microphone-channel-actions">
+                    <label>
+                      Source
+                      <select
+                        className="microphone-select"
+                        value={channel.sourceId}
+                        disabled={
+                          channelRegistry.pendingAction !== null || replacementSources.length === 0
+                        }
+                        onChange={(event) =>
+                          void channelRegistry.replaceSource(channel.id, event.target.value)
+                        }
+                      >
+                        {!replacementSources.some((source) => source.id === channel.sourceId) ? (
+                          <option value={channel.sourceId}>{channel.sourceDisplayName}</option>
+                        ) : null}
+                        {replacementSources.map((source) => (
+                          <option key={source.id} value={source.id}>
+                            {source.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="microphone-test-button"
+                      type="button"
+                      disabled={channelRegistry.pendingAction !== null}
+                      onClick={() => void channelRegistry.remove(channel.id)}
+                    >
+                      Remove channel
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+      </section>
 
       <section className="microphone-test-panel" aria-labelledby="microphone-test-heading">
         <div>
@@ -189,4 +272,8 @@ function LevelMeter({ label, value }: { label: string; value: number }) {
 
 function captureStatusLabel(status: string) {
   return `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
+}
+
+function channelStateLabel(state: "available" | "disconnected") {
+  return state === "available" ? "Available" : "Disconnected";
 }

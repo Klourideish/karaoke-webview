@@ -133,6 +133,13 @@ const secondAvailableMicrophone = {
   isDefault: false,
 };
 
+const microphoneChannel = {
+  id: "microphone-channel-1",
+  sourceId: "windows-mic-primary",
+  sourceDisplayName: "USB Microphone",
+  state: "available" as const,
+};
+
 const idleCaptureSnapshot: DiagnosticCaptureSnapshot = {
   status: "idle",
   sessionId: null,
@@ -281,6 +288,10 @@ function mockInvokeWith({
         return Promise.resolve([]);
       }
 
+      if (command === "list_microphone_channels") {
+        return Promise.resolve([]);
+      }
+
       if (command === "start_diagnostic_capture") {
         return Promise.resolve(activeCaptureSnapshot(args?.sourceId));
       }
@@ -320,6 +331,10 @@ function mockSuccessfulLibraryInvoke(command: string) {
   }
 
   if (command === "discover_local_microphone_sources") {
+    return Promise.resolve([]);
+  }
+
+  if (command === "list_microphone_channels") {
     return Promise.resolve([]);
   }
 
@@ -566,14 +581,112 @@ describe("Microphone workspace", () => {
       await screen.findByText("1 available local microphone input discovered."),
     ).toBeInTheDocument();
     expect(discoveryCount).toBe(2);
+    expect(screen.getByText("No microphone channels created.")).toBeInTheDocument();
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "create_microphone_channel",
+      expect.anything(),
+    );
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "start_diagnostic_capture",
+      expect.anything(),
+    );
+  });
+
+  it("creates and removes a host-owned microphone channel", async () => {
+    tauriMocks.invoke.mockImplementation((command: string, args?: { channelId?: string }) => {
+      if (command === "discover_local_microphone_sources") {
+        return Promise.resolve(discoveredMicrophones);
+      }
+      if (command === "list_microphone_channels") {
+        return Promise.resolve([]);
+      }
+      if (command === "create_microphone_channel") {
+        return Promise.resolve(microphoneChannel);
+      }
+      if (command === "remove_microphone_channel") {
+        expect(args?.channelId).toBe(microphoneChannel.id);
+        return Promise.resolve();
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    await screen.findByText("No microphone channels created.");
+    await user.click(screen.getByRole("button", { name: "Create channel" }));
+
+    expect(await screen.findByRole("heading", { name: microphoneChannel.id })).toBeInTheDocument();
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("create_microphone_channel", {
+      sourceId: "windows-mic-primary",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Remove channel" }));
+
+    expect(await screen.findByText("No microphone channels created.")).toBeInTheDocument();
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("remove_microphone_channel", {
+      channelId: microphoneChannel.id,
+    });
+  });
+
+  it("replaces a channel source without changing channel identity", async () => {
+    const replaced = {
+      ...microphoneChannel,
+      sourceId: secondAvailableMicrophone.id,
+      sourceDisplayName: secondAvailableMicrophone.displayName,
+    };
+    tauriMocks.invoke.mockImplementation(
+      (command: string, args?: { channelId?: string; sourceId?: string }) => {
+        if (command === "discover_local_microphone_sources") {
+          return Promise.resolve([discoveredMicrophones[0], secondAvailableMicrophone]);
+        }
+        if (command === "list_microphone_channels") {
+          return Promise.resolve([microphoneChannel]);
+        }
+        if (command === "replace_microphone_channel_source") {
+          expect(args).toEqual({
+            channelId: microphoneChannel.id,
+            sourceId: secondAvailableMicrophone.id,
+          });
+          return Promise.resolve(replaced);
+        }
+        return mockSuccessfulLibraryInvoke(command);
+      },
+    );
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    const sourceSelect = await screen.findByRole("combobox", { name: "Source" });
+    await user.selectOptions(sourceSelect, secondAvailableMicrophone.id);
+
+    expect(await screen.findByText("Desk Microphone · Available")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: microphoneChannel.id })).toBeInTheDocument();
+  });
+
+  it("does not duplicate explicit channel creation in StrictMode", async () => {
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "discover_local_microphone_sources") {
+        return Promise.resolve(discoveredMicrophones);
+      }
+      if (command === "list_microphone_channels") {
+        return Promise.resolve([]);
+      }
+      if (command === "create_microphone_channel") {
+        return Promise.resolve(microphoneChannel);
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    const user = userEvent.setup();
+    renderStrictApp();
+
+    await openMicrophoneWorkspace(user);
+    await user.click(await screen.findByRole("button", { name: "Create channel" }));
+    await screen.findByRole("heading", { name: microphoneChannel.id });
+
     expect(
-      screen.queryByRole("button", { name: /capture|assign|mute|gain/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      tauriMocks.invoke.mock.calls.some(([command]) =>
-        /channel|capture|assign/i.test(String(command)),
-      ),
-    ).toBe(false);
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "create_microphone_channel"),
+    ).toHaveLength(1);
   });
 
   it("updates the visible registry after an automatic discovery refresh", async () => {

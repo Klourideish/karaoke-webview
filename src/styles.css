@@ -425,6 +425,33 @@ h3 {
   font-weight: 700;
 }
 
+.microphone-source-actions,
+.microphone-channel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.microphone-channel-section {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.microphone-channel-section h3,
+.microphone-channel-section h4,
+.microphone-channel-section p {
+  margin: 0;
+}
+
+.microphone-channel-actions label {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
 .microphone-test-panel {
   display: grid;
   grid-template-columns: minmax(140px, 220px) minmax(220px, 520px);
