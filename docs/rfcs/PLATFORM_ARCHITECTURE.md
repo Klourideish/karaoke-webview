@@ -13,7 +13,7 @@ Platform RFCs define shared authority, vocabulary, lifecycle, resource contracts
 
 Windows Host and Android Companion RFCs are sibling implementation namespaces beneath Platform. They extend Platform RFCs and must not redefine them.
 
-RFC-P-008 is reserved as the shared protocol and connection-state bridge between Host and Android.
+RFC-P-008 is the accepted shared protocol and connection-state bridge between Host, Android, and future clients.
 
 Future implementations may add their own namespace while extending Platform RFCs.
 
@@ -38,7 +38,7 @@ Future implementations may add their own namespace while extending Platform RFCs
 | RFC-P-005  | Microphone Resource Model                    | Accepted |
 | RFC-P-006  | Capture Session Model                        | Accepted |
 | RFC-P-007  | Microphone Assignment & Channel Management   | Accepted |
-| RFC-P-008  | Platform Protocol & Connection State Machine | Reserved |
+| RFC-P-008  | Platform Protocol & Connection State Machine | Accepted |
 
 ---
 

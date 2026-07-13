@@ -18,21 +18,21 @@ No future implementation should reference old identifiers.
 
 ## Namespace Mapping
 
-| Old identifier             | Old title                                  | New identifier | New title                                    | New canonical file                                               |
-| -------------------------- | ------------------------------------------ | -------------- | -------------------------------------------- | ---------------------------------------------------------------- |
-| RFC-001                    | Host Authority                             | RFC-P-001      | Platform Authority                           | `platform/RFC-P-001-platform-authority.md`                       |
-| RFC-002                    | Domain Model                               | RFC-P-002      | Platform Domain Model                        | `platform/RFC-P-002-platform-domain-model.md`                    |
-| RFC-003                    | Performance Lifecycle                      | RFC-P-003      | Performance Lifecycle                        | `platform/RFC-P-003-performance-lifecycle.md`                    |
-| RFC-004                    | Karaoke Modes                              | RFC-P-004      | Karaoke Modes                                | `platform/RFC-P-004-karaoke-modes.md`                            |
-| RFC-007                    | Microphone Lifecycle                       | RFC-P-005      | Microphone Resource Model                    | `platform/RFC-P-005-microphone-resource-model.md`                |
-| RFC-008                    | Capture Sessions                           | RFC-P-006      | Capture Session Model                        | `platform/RFC-P-006-capture-session-model.md`                    |
-| RFC-013                    | Microphone Assignment & Channel Management | RFC-P-007      | Microphone Assignment & Channel Management   | `platform/RFC-P-007-microphone-assignment-channel-management.md` |
-| planned RFC-009            | Protocol & Connection State Machine        | RFC-P-008      | Platform Protocol & Connection State Machine | `platform/RFC-P-008-protocol-connection-state-machine.md`        |
-| reserved RFC-010           | Scoring Pipeline                           | RFC-P-009      | Scoring Pipeline                             | reserved                                                         |
-| reserved RFC-011           | Battle Performance Coordination            | RFC-P-010      | Battle Performance Coordination              | reserved                                                         |
-| reserved RFC-012           | Recording & Media Capture                  | RFC-P-011      | Recording & Media Capture                    | reserved                                                         |
-| previous RFC-005 reference | Profile & Identity                         | RFC-P-012      | Profile & Identity                           | reserved                                                         |
-| previous RFC-006 reference | History & Leaderboards                     | RFC-P-013      | History & Leaderboards                       | reserved                                                         |
+| Old identifier             | Old title                                  | New identifier | New title                                    | New canonical file                                                 |
+| -------------------------- | ------------------------------------------ | -------------- | -------------------------------------------- | ------------------------------------------------------------------ |
+| RFC-001                    | Host Authority                             | RFC-P-001      | Platform Authority                           | `platform/RFC-P-001-platform-authority.md`                         |
+| RFC-002                    | Domain Model                               | RFC-P-002      | Platform Domain Model                        | `platform/RFC-P-002-platform-domain-model.md`                      |
+| RFC-003                    | Performance Lifecycle                      | RFC-P-003      | Performance Lifecycle                        | `platform/RFC-P-003-performance-lifecycle.md`                      |
+| RFC-004                    | Karaoke Modes                              | RFC-P-004      | Karaoke Modes                                | `platform/RFC-P-004-karaoke-modes.md`                              |
+| RFC-007                    | Microphone Lifecycle                       | RFC-P-005      | Microphone Resource Model                    | `platform/RFC-P-005-microphone-resource-model.md`                  |
+| RFC-008                    | Capture Sessions                           | RFC-P-006      | Capture Session Model                        | `platform/RFC-P-006-capture-session-model.md`                      |
+| RFC-013                    | Microphone Assignment & Channel Management | RFC-P-007      | Microphone Assignment & Channel Management   | `platform/RFC-P-007-microphone-assignment-channel-management.md`   |
+| planned RFC-009            | Protocol & Connection State Machine        | RFC-P-008      | Platform Protocol & Connection State Machine | `platform/RFC-P-008-platform-protocol-connection-state-machine.md` |
+| reserved RFC-010           | Scoring Pipeline                           | RFC-P-009      | Scoring Pipeline                             | reserved                                                           |
+| reserved RFC-011           | Battle Performance Coordination            | RFC-P-010      | Battle Performance Coordination              | reserved                                                           |
+| reserved RFC-012           | Recording & Media Capture                  | RFC-P-011      | Recording & Media Capture                    | reserved                                                           |
+| previous RFC-005 reference | Profile & Identity                         | RFC-P-012      | Profile & Identity                           | reserved                                                           |
+| previous RFC-006 reference | History & Leaderboards                     | RFC-P-013      | History & Leaderboards                       | reserved                                                           |
 
 ---
 

@@ -15,14 +15,8 @@ Every Host, Android, protocol, and future implementation RFC extends these found
 - RFC-P-005 - Microphone Resource Model
 - RFC-P-006 - Capture Session Model
 - RFC-P-007 - Microphone Assignment & Channel Management
-
----
-
-## Next Shared Platform RFC
-
-RFC-P-008 - Platform Protocol & Connection State Machine is reserved as the next shared Platform RFC.
-
-It is not yet accepted authority.
+- RFC-P-008 - Platform Protocol & Connection State Machine
+- RFC-P-014 - Accepted Media File Types
 
 ---
 

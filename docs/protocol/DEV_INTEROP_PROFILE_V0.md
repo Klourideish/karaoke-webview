@@ -359,18 +359,18 @@ Each UDP datagram contains exactly one complete 10 ms audio frame.
 
 ## 9.1 Header
 
-| Offset | Size | Field |
-|---:|---:|---|
-| 0 | 4 | Magic bytes `KWAV` |
-| 4 | 1 | Audio profile version |
-| 5 | 1 | Flags |
-| 6 | 2 | Header length |
-| 8 | 4 | Audio stream ID |
-| 12 | 8 | Sequence number |
-| 20 | 8 | First sample index |
-| 28 | 8 | Capture timestamp nanoseconds |
-| 36 | 2 | Sample count |
-| 38 | 2 | Reserved |
+| Offset | Size | Field                         |
+| -----: | ---: | ----------------------------- |
+|      0 |    4 | Magic bytes `KWAV`            |
+|      4 |    1 | Audio profile version         |
+|      5 |    1 | Flags                         |
+|      6 |    2 | Header length                 |
+|      8 |    4 | Audio stream ID               |
+|     12 |    8 | Sequence number               |
+|     20 |    8 | First sample index            |
+|     28 |    8 | Capture timestamp nanoseconds |
+|     36 |    2 | Sample count                  |
+|     38 |    2 | Reserved                      |
 
 Header length:
 

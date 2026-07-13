@@ -63,6 +63,10 @@ The parser decodes XML entities, preserves Unicode text, reports recoverable war
 
 Timed TTML spans are treated as renderer-neutral fragments. A fragment may be a word, syllable, punctuation mark, or sung text piece; the renderer preserves source fragment order and spacing, then applies a restrained classic karaoke fill to the current line. The fill is driven by the authoritative audio clock: past fragments are filled, the active fragment fills left to right, and upcoming fragments remain unfilled. Romanization, parsed-lyrics caching, selectable effect presets, and broader visual effects are not implemented yet.
 
+## Development Network Microphone Receiver
+
+The Microphones workspace includes an explicitly insecure development-only network microphone receiver for `DEV_INTEROP_PROFILE_V0`. It is started manually, defaults to TCP `45820` and UDP `45821`, and feeds valid synthetic PCM packets into the existing diagnostic CaptureSession meter. This is not production protocol security, does not implement Android pairing, and does not expose raw PCM to React.
+
 ## Validation
 
 ```powershell
