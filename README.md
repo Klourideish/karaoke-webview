@@ -4,6 +4,8 @@ Karaoke Webview is a new Windows-only desktop foundation for a future karaoke ap
 
 This is a personal, local-first experimental project. Its planned architecture uses this Windows application as the authoritative karaoke host, with a separate lightweight Android microphone client. Networking is architectural direction only and is not implemented. See [Architecture vision](docs/architecture-vision.md), [Domain model](docs/domain-model.md), [Performance lifecycle](docs/performance-lifecycle.md), [Protocol draft](docs/protocol-draft.md), and [Roadmap](docs/roadmap.md).
 
+Provisional operator-facing UI direction lives in [Design documents](docs/design/README.md). These documents are product guidance, not architectural RFCs.
+
 This project was created independently. The separate browser-based `karaoke-app` repository is reference material only; no source code, configuration, dependencies, scripts, assets, documentation, architecture, or Git history are shared.
 
 ## Prerequisites
