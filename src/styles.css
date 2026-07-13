@@ -400,6 +400,105 @@ h3 {
   color: #ffc9c2 !important;
 }
 
+.singer-microphone-list {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.singer-microphone-card {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(220px, 1fr) minmax(160px, 0.8fr) auto;
+  gap: var(--space-4);
+  align-items: center;
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.singer-microphone-main,
+.singer-microphone-selector,
+.singer-microphone-meter-group {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.singer-microphone-main h3,
+.singer-microphone-main p {
+  margin: 0;
+}
+
+.singer-microphone-main p,
+.singer-microphone-meter-heading {
+  color: var(--muted);
+}
+
+.microphone-status-badge {
+  display: inline-flex;
+  width: fit-content;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.microphone-status-badge[data-status="ready"] {
+  border-color: rgba(101, 214, 154, 0.42);
+  color: #9ff0bd;
+}
+
+.microphone-status-badge[data-status="disconnected"],
+.microphone-status-badge[data-status="needs-attention"] {
+  border-color: rgba(255, 201, 194, 0.42);
+  color: #ffc9c2;
+}
+
+.microphone-status-badge[data-status="waiting"] {
+  border-color: rgba(255, 214, 128, 0.42);
+  color: #ffd680;
+}
+
+.singer-microphone-meter-heading,
+.singer-microphone-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.singer-microphone-actions {
+  justify-content: flex-end;
+}
+
+.microphone-secondary-section {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-1);
+}
+
+.microphone-secondary-section summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.microphone-secondary-section[open] {
+  background: var(--surface-2);
+}
+
+.developer-diagnostics-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
 .microphone-source-list {
   display: grid;
   gap: var(--space-3);

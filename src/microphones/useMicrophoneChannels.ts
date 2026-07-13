@@ -62,11 +62,13 @@ export function useMicrophoneChannels(discoveredSources: readonly LocalMicrophon
       if (requestVersionRef.current === requestVersion) {
         setChannels((current) => [...current, created]);
       }
+      return created;
     } catch (cause) {
       console.error("Microphone channel could not be created.", cause);
       if (requestVersionRef.current === requestVersion) {
         setError("Could not create the microphone channel.");
       }
+      return null;
     } finally {
       if (requestVersionRef.current === requestVersion) {
         setPendingAction(null);

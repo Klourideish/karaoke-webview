@@ -12,8 +12,6 @@ import type {
   PerformanceMicrophoneReadiness,
 } from "./microphones/types";
 import type { DiagnosticCaptureSnapshot } from "./microphones/diagnosticCapture";
-import { DIAGNOSTIC_LEVEL_POLL_INTERVAL_MS } from "./microphones/useDiagnosticCapture";
-import { LOCAL_MICROPHONE_REFRESH_INTERVAL_MS } from "./microphones/useLocalMicrophones";
 
 const tauriMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -678,7 +676,234 @@ describe("App shell", () => {
 });
 
 describe("Microphone workspace", () => {
-  it("shows loading and then an empty discovery state", async () => {
+  type MicrophoneInvokeState = {
+    sources?: LocalMicrophoneSource[];
+    channels?: (typeof microphoneChannel)[];
+    assignments?: (typeof microphoneAssignment)[];
+    waitingStates?: (typeof microphoneWaitingState)[];
+    recoveryStates?: (typeof disconnectedRecoveryState)[];
+    captureSnapshot?: DiagnosticCaptureSnapshot;
+    developmentStatus?: DevelopmentProtocolStatus;
+    developmentDiagnostics?: DevelopmentStreamDiagnostics;
+  };
+
+  function mockMicrophoneWorkspace(state: MicrophoneInvokeState = {}) {
+    let sources = state.sources ?? discoveredMicrophones;
+    let channels = state.channels ? [...state.channels] : [];
+    let assignments = state.assignments ? [...state.assignments] : [];
+    let waitingStates = state.waitingStates ? [...state.waitingStates] : [];
+    let recoveryStates = state.recoveryStates ? [...state.recoveryStates] : [];
+    let captureSnapshot = state.captureSnapshot ?? idleCaptureSnapshot;
+    let developmentStatus = state.developmentStatus ?? stoppedDevelopmentStatus;
+    let developmentDiagnostics = state.developmentDiagnostics ?? idleDevelopmentDiagnostics;
+    let nextChannelSequence = 2;
+
+    tauriMocks.invoke.mockImplementation((command: string, args?: Record<string, unknown>) => {
+      if (command === "discover_local_microphone_sources") {
+        return Promise.resolve(sources);
+      }
+
+      if (command === "list_microphone_channels") {
+        return Promise.resolve(channels);
+      }
+
+      if (command === "create_microphone_channel") {
+        const sourceId = String(args?.sourceId ?? "");
+        const source = sources.find((candidate) => candidate.id === sourceId);
+        const created = {
+          id: `microphone-channel-${nextChannelSequence++}`,
+          sourceId,
+          sourceDisplayName: source?.displayName ?? "Microphone",
+          state: "available" as const,
+        };
+        channels = [...channels, created];
+        return Promise.resolve(created);
+      }
+
+      if (command === "remove_microphone_channel") {
+        const channelId = String(args?.channelId ?? "");
+        channels = channels.filter((channel) => channel.id !== channelId);
+        assignments = assignments.filter((assignment) => assignment.channelId !== channelId);
+        return Promise.resolve();
+      }
+
+      if (
+        command === "replace_microphone_channel_source" ||
+        command === "replace_disconnected_microphone_channel_source"
+      ) {
+        const channelId = String(args?.channelId ?? "");
+        const sourceId = String(args?.sourceId ?? "");
+        const source = sources.find((candidate) => candidate.id === sourceId);
+        const replaced = {
+          id: channelId,
+          sourceId,
+          sourceDisplayName: source?.displayName ?? "Microphone",
+          state: "available" as const,
+        };
+        channels = channels.map((channel) => (channel.id === channelId ? replaced : channel));
+        recoveryStates = recoveryStates.filter((state) => state.channelId !== channelId);
+        return Promise.resolve(replaced);
+      }
+
+      if (command === "sync_session_singers" || command === "list_microphone_assignments") {
+        return Promise.resolve(assignments);
+      }
+
+      if (command === "assign_microphone_channel") {
+        const channelId = String(args?.channelId ?? "");
+        const singerId = String(args?.singerId ?? "");
+        const assigned = {
+          channelId,
+          singerId,
+          method: "manual" as const,
+          sequence: assignments.length + 1,
+        };
+        assignments = assignments
+          .filter(
+            (assignment) => assignment.channelId !== channelId && assignment.singerId !== singerId,
+          )
+          .concat(assigned);
+        waitingStates = waitingStates.filter((waiting) => waiting.singerId !== singerId);
+        return Promise.resolve(assigned);
+      }
+
+      if (command === "unassign_microphone_channel") {
+        const channelId = String(args?.channelId ?? "");
+        assignments = assignments.filter((assignment) => assignment.channelId !== channelId);
+        return Promise.resolve();
+      }
+
+      if (command === "auto_assign_microphone_channel") {
+        const singerId = String(args?.singerId ?? "");
+        const unassignedChannel = channels.find(
+          (channel) => !assignments.some((assignment) => assignment.channelId === channel.id),
+        );
+        if (!unassignedChannel) {
+          const waiting = { ...microphoneWaitingState, singerId };
+          waitingStates = waitingStates
+            .filter((state) => state.singerId !== singerId)
+            .concat(waiting);
+          return Promise.resolve({ assignment: null, waiting });
+        }
+        const assigned = {
+          channelId: unassignedChannel.id,
+          singerId,
+          method: "automatic" as const,
+          sequence: assignments.length + 1,
+        };
+        assignments = assignments
+          .filter((assignment) => assignment.singerId !== singerId)
+          .concat(assigned);
+        waitingStates = waitingStates.filter((state) => state.singerId !== singerId);
+        return Promise.resolve({ assignment: assigned, waiting: null });
+      }
+
+      if (command === "list_microphone_waiting_states") {
+        return Promise.resolve(waitingStates);
+      }
+
+      if (command === "clear_microphone_waiting_state") {
+        const singerId = String(args?.singerId ?? "");
+        waitingStates = waitingStates.filter((state) => state.singerId !== singerId);
+        return Promise.resolve();
+      }
+
+      if (command === "get_microphone_recovery_states") {
+        return Promise.resolve(recoveryStates);
+      }
+
+      if (command === "retry_microphone_channel_source") {
+        const channelId = String(args?.channelId ?? "");
+        const state = recoveryStates.find((candidate) => candidate.channelId === channelId) ?? {
+          ...disconnectedRecoveryState,
+          channelId,
+        };
+        return Promise.resolve(state);
+      }
+
+      if (command === "leave_microphone_channel_assigned") {
+        const channelId = String(args?.channelId ?? "");
+        const state = recoveryStates.find((candidate) => candidate.channelId === channelId) ?? {
+          ...disconnectedRecoveryState,
+          channelId,
+        };
+        return Promise.resolve(state);
+      }
+
+      if (command === "evaluate_performance_microphone_readiness") {
+        return Promise.resolve(readyPerformanceMicrophoneReadiness);
+      }
+
+      if (command === "start_diagnostic_capture") {
+        captureSnapshot = activeCaptureSnapshot(String(args?.sourceId ?? ""), {
+          rms: 0.48,
+          peak: 0.64,
+          clipping: false,
+          sequence: 1,
+        });
+        return Promise.resolve(captureSnapshot);
+      }
+
+      if (command === "stop_diagnostic_capture") {
+        captureSnapshot = idleCaptureSnapshot;
+        return Promise.resolve(captureSnapshot);
+      }
+
+      if (command === "diagnostic_capture_snapshot") {
+        return Promise.resolve(captureSnapshot);
+      }
+
+      if (command === "get_development_protocol_status") {
+        return Promise.resolve(developmentStatus);
+      }
+
+      if (command === "get_development_stream_diagnostics") {
+        return Promise.resolve(developmentDiagnostics);
+      }
+
+      if (command === "start_development_protocol_listener") {
+        developmentStatus = activeDevelopmentStatus;
+        developmentDiagnostics = { ...idleDevelopmentDiagnostics, activeStreamId: 1 };
+        sources = [
+          ...sources,
+          {
+            id: activeDevelopmentStatus.sourceId ?? "network-mic-development-1",
+            displayName: "Android Test",
+            kind: "network-client" as const,
+            availability: "available" as const,
+            isDefault: false,
+          },
+        ];
+        return Promise.resolve({
+          status: developmentStatus,
+          diagnostics: developmentDiagnostics,
+          sources,
+        });
+      }
+
+      if (command === "stop_development_protocol_listener") {
+        developmentStatus = stoppedDevelopmentStatus;
+        developmentDiagnostics = idleDevelopmentDiagnostics;
+        return Promise.resolve({
+          status: developmentStatus,
+          diagnostics: developmentDiagnostics,
+          sources: [],
+        });
+      }
+
+      if (command === "list_development_network_sources") {
+        return Promise.resolve(sources.filter((source) => source.kind === "network-client"));
+      }
+
+      return mockSuccessfulLibraryInvoke(command);
+    });
+  }
+
+  async function openDeveloperDiagnostics(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByText("Developer diagnostics"));
+  }
+
+  it("shows loading and then an empty available-microphone state", async () => {
     const deferred = createDeferred<LocalMicrophoneSource[]>();
     tauriMocks.invoke.mockImplementation((command: string) => {
       if (command === "discover_local_microphone_sources") {
@@ -691,1076 +916,315 @@ describe("Microphone workspace", () => {
 
     await openMicrophoneWorkspace(user);
 
-    expect(screen.getByText("Discovering local microphone inputs...")).toBeInTheDocument();
+    expect(screen.getByText("Finding microphones...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
 
     deferred.resolve([]);
 
-    expect(
-      await screen.findByText("No available local microphone inputs were found."),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("No available microphones were found.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
   });
 
-  it("renders insecure development listener controls and starts/stops explicitly", async () => {
-    const user = userEvent.setup();
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve([]);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-
-    expect(await screen.findByText(/INSECURE DEVELOPMENT CONNECTION/)).toBeInTheDocument();
-    expect(screen.getByText(/Listener: Stopped · TCP 45820 · UDP 45821/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Start Listener" }));
-    expect(tauriMocks.invoke).toHaveBeenCalledWith("start_development_protocol_listener", {
-      request: {},
-    });
-    expect(await screen.findByText(/Client: Android Test/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Stop Listener" }));
-    expect(tauriMocks.invoke).toHaveBeenCalledWith("stop_development_protocol_listener");
-    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
-      "create_microphone_channel",
-      expect.anything(),
-    );
-  });
-  it("renders available sources, hides unavailable sources, and keeps the default visible", async () => {
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(discoveredMicrophones);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
+  it("renders one singer-centered row per singer without internal IDs in the normal flow", async () => {
+    mockMicrophoneWorkspace();
     const user = userEvent.setup();
     render(<App />);
 
     await openMicrophoneWorkspace(user);
 
-    expect(
-      await screen.findByText("1 available local microphone input discovered."),
-    ).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { name: "USB Microphone" })).toHaveLength(1);
-    expect(screen.getByText("Default input")).toBeInTheDocument();
-    expect(screen.getByText("Available · Windows input")).toBeInTheDocument();
-    expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
+    const singerList = await screen.findByLabelText("Singer microphones");
+    const rows = within(singerList).getAllByRole("article");
+    expect(rows).toHaveLength(4);
+    expect(within(singerList).getByText("Singer 1")).toBeInTheDocument();
+    expect(within(singerList).getByText("Singer 4")).toBeInTheDocument();
+    expect(within(singerList).queryByText("microphone-channel-1")).not.toBeInTheDocument();
+    expect(within(singerList).queryByText("windows-mic-primary")).not.toBeInTheDocument();
+    expect(within(singerList).queryByText(/MicrophoneChannel/i)).not.toBeInTheDocument();
+    expect(within(singerList).queryByText(/CaptureSession/i)).not.toBeInTheDocument();
   });
 
-  it("shows an available-source empty state when the registry contains only unavailable inputs", async () => {
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve([discoveredMicrophones[1]]);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
+  it("creates and assigns a microphone when an unassigned singer chooses one", async () => {
+    mockMicrophoneWorkspace({ sources: [discoveredMicrophones[0]] });
     const user = userEvent.setup();
     render(<App />);
 
     await openMicrophoneWorkspace(user);
-
-    expect(
-      await screen.findByText("No available local microphone inputs were found."),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "USB Microphone" })).not.toBeInTheDocument();
-  });
-
-  it("shows a recoverable discovery failure", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.reject(new Error("backend unavailable"));
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-
-    expect(
-      await screen.findByText("Could not discover local microphone inputs."),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
-  });
-
-  it("refreshes discovery without creating channels or capture side effects", async () => {
-    let discoveryCount = 0;
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        discoveryCount += 1;
-        return Promise.resolve(discoveryCount === 1 ? [] : discoveredMicrophones);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    await screen.findByText("No available local microphone inputs were found.");
-    await user.click(screen.getByRole("button", { name: "Refresh" }));
-
-    expect(
-      await screen.findByText("1 available local microphone input discovered."),
-    ).toBeInTheDocument();
-    expect(discoveryCount).toBe(2);
-    expect(screen.getByText("No microphone channels created.")).toBeInTheDocument();
-    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
-      "create_microphone_channel",
-      expect.anything(),
-    );
-    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
-      "start_diagnostic_capture",
-      expect.anything(),
-    );
-  });
-
-  it("creates and removes a host-owned microphone channel", async () => {
-    tauriMocks.invoke.mockImplementation((command: string, args?: { channelId?: string }) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(discoveredMicrophones);
-      }
-      if (command === "list_microphone_channels") {
-        return Promise.resolve([]);
-      }
-      if (command === "create_microphone_channel") {
-        return Promise.resolve(microphoneChannel);
-      }
-      if (command === "remove_microphone_channel") {
-        expect(args?.channelId).toBe(microphoneChannel.id);
-        return Promise.resolve();
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    await screen.findByText("No microphone channels created.");
-    await user.click(screen.getByRole("button", { name: "Create channel" }));
-
-    expect(await screen.findByRole("heading", { name: microphoneChannel.id })).toBeInTheDocument();
-    expect(tauriMocks.invoke).toHaveBeenCalledWith("create_microphone_channel", {
-      sourceId: "windows-mic-primary",
-    });
-
-    await user.click(screen.getByRole("button", { name: "Release channel" }));
-
-    expect(await screen.findByText("No microphone channels created.")).toBeInTheDocument();
-    expect(tauriMocks.invoke).toHaveBeenCalledWith("remove_microphone_channel", {
-      channelId: microphoneChannel.id,
-    });
-  });
-
-  it("replaces a channel source without changing channel identity", async () => {
-    const replaced = {
-      ...microphoneChannel,
-      sourceId: secondAvailableMicrophone.id,
-      sourceDisplayName: secondAvailableMicrophone.displayName,
-    };
-    tauriMocks.invoke.mockImplementation(
-      (command: string, args?: { channelId?: string; sourceId?: string }) => {
-        if (command === "discover_local_microphone_sources") {
-          return Promise.resolve([discoveredMicrophones[0], secondAvailableMicrophone]);
-        }
-        if (command === "list_microphone_channels") {
-          return Promise.resolve([microphoneChannel]);
-        }
-        if (command === "replace_microphone_channel_source") {
-          expect(args).toEqual({
-            channelId: microphoneChannel.id,
-            sourceId: secondAvailableMicrophone.id,
-          });
-          return Promise.resolve(replaced);
-        }
-        return mockSuccessfulLibraryInvoke(command);
-      },
-    );
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    const sourceSelect = await screen.findByRole("combobox", { name: "Source" });
-    await user.selectOptions(sourceSelect, secondAvailableMicrophone.id);
-
-    expect(await screen.findByText("Desk Microphone · Available")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: microphoneChannel.id })).toBeInTheDocument();
-  });
-
-  it("does not duplicate explicit channel creation in StrictMode", async () => {
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(discoveredMicrophones);
-      }
-      if (command === "list_microphone_channels") {
-        return Promise.resolve([]);
-      }
-      if (command === "create_microphone_channel") {
-        return Promise.resolve(microphoneChannel);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    renderStrictApp();
-
-    await openMicrophoneWorkspace(user);
-    await user.click(await screen.findByRole("button", { name: "Create channel" }));
-    await screen.findByRole("heading", { name: microphoneChannel.id });
-
-    expect(
-      tauriMocks.invoke.mock.calls.filter(([command]) => command === "create_microphone_channel"),
-    ).toHaveLength(1);
-  });
-
-  it("assigns and unassigns a channel without capture side effects", async () => {
-    tauriMocks.invoke.mockImplementation(
-      (command: string, args?: { channelId?: string; singerId?: string }) => {
-        if (command === "discover_local_microphone_sources") {
-          return Promise.resolve(discoveredMicrophones);
-        }
-        if (command === "list_microphone_channels") {
-          return Promise.resolve([microphoneChannel]);
-        }
-        if (command === "sync_session_singers") {
-          return Promise.resolve([]);
-        }
-        if (command === "assign_microphone_channel") {
-          expect(args).toEqual({ channelId: microphoneChannel.id, singerId: "singer-1" });
-          return Promise.resolve(microphoneAssignment);
-        }
-        if (command === "unassign_microphone_channel") {
-          expect(args).toEqual({ channelId: microphoneChannel.id });
-          return Promise.resolve();
-        }
-        return mockSuccessfulLibraryInvoke(command);
-      },
-    );
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    const assignmentSelect = await screen.findByRole("combobox", { name: "Assigned singer" });
-    await user.selectOptions(assignmentSelect, "singer-1");
-
-    expect(assignmentSelect).toHaveValue("singer-1");
-    expect(screen.getByRole("button", { name: "Release channel" })).toBeDisabled();
-
-    await user.selectOptions(assignmentSelect, "");
-
-    expect(assignmentSelect).toHaveValue("");
-    expect(screen.getByRole("button", { name: "Release channel" })).toBeEnabled();
-    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
-      "start_diagnostic_capture",
-      expect.anything(),
-    );
-  });
-
-  it("reassigns a channel and preserves it across workspace remount", async () => {
-    const reassigned = { ...microphoneAssignment, singerId: "singer-2", sequence: 2 };
-    tauriMocks.invoke.mockImplementation(
-      (command: string, args?: { channelId?: string; singerId?: string }) => {
-        if (command === "discover_local_microphone_sources") {
-          return Promise.resolve(discoveredMicrophones);
-        }
-        if (command === "list_microphone_channels") {
-          return Promise.resolve([microphoneChannel]);
-        }
-        if (command === "sync_session_singers") {
-          return Promise.resolve([microphoneAssignment]);
-        }
-        if (command === "assign_microphone_channel") {
-          expect(args).toEqual({ channelId: microphoneChannel.id, singerId: "singer-2" });
-          return Promise.resolve(reassigned);
-        }
-        return mockSuccessfulLibraryInvoke(command);
-      },
-    );
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    await user.selectOptions(
-      await screen.findByRole("combobox", { name: "Assigned singer" }),
-      "singer-2",
-    );
-    expect(screen.getByRole("combobox", { name: "Assigned singer" })).toHaveValue("singer-2");
-
-    await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.click(screen.getByRole("button", { name: "Microphones" }));
-
-    expect(await screen.findByRole("combobox", { name: "Assigned singer" })).toHaveValue(
-      "singer-2",
-    );
-  });
-
-  it("does not duplicate explicit assignment in StrictMode", async () => {
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(discoveredMicrophones);
-      }
-      if (command === "list_microphone_channels") {
-        return Promise.resolve([microphoneChannel]);
-      }
-      if (command === "sync_session_singers") {
-        return Promise.resolve([]);
-      }
-      if (command === "assign_microphone_channel") {
-        return Promise.resolve(microphoneAssignment);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    renderStrictApp();
-
-    await openMicrophoneWorkspace(user);
-    await user.selectOptions(
-      await screen.findByRole("combobox", { name: "Assigned singer" }),
-      "singer-1",
-    );
-
-    expect(
-      tauriMocks.invoke.mock.calls.filter(([command]) => command === "assign_microphone_channel"),
-    ).toHaveLength(1);
-  });
-
-  it("automatically assigns a singer and refreshes a newly created channel", async () => {
-    let channels: (typeof microphoneChannel)[] = [];
-    tauriMocks.invoke.mockImplementation((command: string, args?: { singerId?: string }) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(discoveredMicrophones);
-      }
-      if (command === "list_microphone_channels") {
-        return Promise.resolve(channels);
-      }
-      if (command === "sync_session_singers" || command === "list_microphone_waiting_states") {
-        return Promise.resolve([]);
-      }
-      if (command === "auto_assign_microphone_channel") {
-        expect(args).toEqual({ singerId: "singer-1" });
-        channels = [microphoneChannel];
-        return Promise.resolve({
-          status: "assigned",
-          assignment: { ...microphoneAssignment, method: "automatic" },
-          waitingState: null,
-        });
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    await user.click(screen.getAllByRole("button", { name: "Auto Assign" })[0]);
-
-    expect(await screen.findByText(`${microphoneChannel.id} · Available`)).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: microphoneChannel.id })).toBeInTheDocument();
-    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
-      "start_diagnostic_capture",
-      expect.anything(),
-    );
-  });
-
-  it("shows and explicitly clears a waiting-for-microphone reason", async () => {
-    tauriMocks.invoke.mockImplementation((command: string, args?: { singerId?: string }) => {
-      if (
-        command === "discover_local_microphone_sources" ||
-        command === "list_microphone_channels"
-      ) {
-        return Promise.resolve([]);
-      }
-      if (command === "sync_session_singers" || command === "list_microphone_waiting_states") {
-        return Promise.resolve([]);
-      }
-      if (command === "auto_assign_microphone_channel") {
-        return Promise.resolve({
-          status: "waiting",
-          assignment: null,
-          waitingState: microphoneWaitingState,
-        });
-      }
-      if (command === "clear_microphone_waiting_state") {
-        expect(args).toEqual({ singerId: "singer-1" });
-        return Promise.resolve();
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    await user.click(screen.getAllByRole("button", { name: "Auto Assign" })[0]);
-
-    expect(await screen.findByText(microphoneWaitingState.message)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Clear waiting status" }));
-    expect(await screen.findAllByText("No microphone assigned.")).toHaveLength(4);
-  });
-
-  it("preserves waiting state across workspace remount", async () => {
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (
-        command === "discover_local_microphone_sources" ||
-        command === "list_microphone_channels"
-      ) {
-        return Promise.resolve([]);
-      }
-      if (command === "sync_session_singers") {
-        return Promise.resolve([]);
-      }
-      if (command === "list_microphone_waiting_states") {
-        return Promise.resolve([microphoneWaitingState]);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    expect(await screen.findByText(microphoneWaitingState.message)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.click(screen.getByRole("button", { name: "Microphones" }));
-
-    expect(await screen.findByText(microphoneWaitingState.message)).toBeInTheDocument();
-  });
-
-  it("does not duplicate automatic assignment in StrictMode", async () => {
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(discoveredMicrophones);
-      }
-      if (command === "list_microphone_channels") {
-        return Promise.resolve([microphoneChannel]);
-      }
-      if (command === "sync_session_singers" || command === "list_microphone_waiting_states") {
-        return Promise.resolve([]);
-      }
-      if (command === "auto_assign_microphone_channel") {
-        return Promise.resolve({
-          status: "assigned",
-          assignment: { ...microphoneAssignment, method: "automatic" },
-          waitingState: null,
-        });
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    renderStrictApp();
-
-    await openMicrophoneWorkspace(user);
-    await user.click(screen.getAllByRole("button", { name: "Auto Assign" })[0]);
-    await screen.findByText(`${microphoneChannel.id} · Available`);
-
-    expect(
-      tauriMocks.invoke.mock.calls.filter(
-        ([command]) => command === "auto_assign_microphone_channel",
-      ),
-    ).toHaveLength(1);
-  });
-
-  it("keeps a disconnected channel assigned and separate from waiting state", async () => {
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve([secondAvailableMicrophone]);
-      }
-      if (command === "list_microphone_channels") {
-        return Promise.resolve([disconnectedMicrophoneChannel]);
-      }
-      if (command === "sync_session_singers") {
-        return Promise.resolve([microphoneAssignment]);
-      }
-      if (command === "list_microphone_waiting_states") {
-        return Promise.resolve([]);
-      }
-      if (command === "get_microphone_recovery_states") {
-        return Promise.resolve([disconnectedRecoveryState]);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-
-    expect(await screen.findByText(`${microphoneChannel.id} · Disconnected`)).toBeInTheDocument();
-    expect(screen.getByText(/Recovery: Replacement Available/)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Assigned singer" })).toHaveValue("singer-1");
-    expect(screen.queryByText(microphoneWaitingState.message)).not.toBeInTheDocument();
-  });
-
-  it("retries the original source without changing assignment or starting capture", async () => {
-    const failedState = {
-      ...disconnectedRecoveryState,
-      status: "recovery-failed" as const,
-      reason: "The original microphone source is still unavailable.",
-    };
-    let retryFailed = false;
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve([secondAvailableMicrophone]);
-      }
-      if (command === "list_microphone_channels") {
-        return Promise.resolve([disconnectedMicrophoneChannel]);
-      }
-      if (command === "sync_session_singers") {
-        return Promise.resolve([microphoneAssignment]);
-      }
-      if (command === "list_microphone_waiting_states") {
-        return Promise.resolve([]);
-      }
-      if (command === "get_microphone_recovery_states") {
-        return Promise.resolve([retryFailed ? failedState : disconnectedRecoveryState]);
-      }
-      if (command === "retry_microphone_channel_source") {
-        retryFailed = true;
-        return Promise.resolve(failedState);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    renderStrictApp();
-
-    await openMicrophoneWorkspace(user);
-    await user.click(await screen.findByRole("button", { name: "Retry original source" }));
-
-    expect(await screen.findByText(/Recovery: Recovery Failed/)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Assigned singer" })).toHaveValue("singer-1");
-    expect(
-      tauriMocks.invoke.mock.calls.filter(
-        ([command]) => command === "retry_microphone_channel_source",
-      ),
-    ).toHaveLength(1);
-    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
-      "start_diagnostic_capture",
-      expect.anything(),
-    );
-  });
-
-  it("explicitly replaces a disconnected source while preserving channel and assignment", async () => {
-    const recoveredChannel = {
-      ...microphoneChannel,
-      sourceId: secondAvailableMicrophone.id,
-      sourceDisplayName: secondAvailableMicrophone.displayName,
-    };
-    tauriMocks.invoke.mockImplementation(
-      (command: string, args?: { channelId?: string; sourceId?: string }) => {
-        if (command === "discover_local_microphone_sources") {
-          return Promise.resolve([secondAvailableMicrophone]);
-        }
-        if (command === "list_microphone_channels") {
-          return Promise.resolve([disconnectedMicrophoneChannel]);
-        }
-        if (command === "sync_session_singers") {
-          return Promise.resolve([microphoneAssignment]);
-        }
-        if (command === "list_microphone_waiting_states") {
-          return Promise.resolve([]);
-        }
-        if (command === "get_microphone_recovery_states") {
-          return Promise.resolve([disconnectedRecoveryState]);
-        }
-        if (command === "replace_disconnected_microphone_channel_source") {
-          expect(args).toEqual({
-            channelId: microphoneChannel.id,
-            sourceId: secondAvailableMicrophone.id,
-          });
-          return Promise.resolve(recoveredChannel);
-        }
-        return mockSuccessfulLibraryInvoke(command);
-      },
-    );
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    await user.selectOptions(
-      await screen.findByRole("combobox", { name: "Replace source" }),
-      secondAvailableMicrophone.id,
-    );
-
-    expect(await screen.findByText("Desk Microphone · Available")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: microphoneChannel.id })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Assigned singer" })).toHaveValue("singer-1");
-  });
-
-  it("leaves a disconnected channel assigned across workspace remount", async () => {
-    const heldState = {
-      ...disconnectedRecoveryState,
-      status: "disconnected" as const,
-      reason: "Left assigned while the operator decides how to recover it.",
-    };
-    let held = false;
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve([secondAvailableMicrophone]);
-      }
-      if (command === "list_microphone_channels") {
-        return Promise.resolve([disconnectedMicrophoneChannel]);
-      }
-      if (command === "sync_session_singers") {
-        return Promise.resolve([microphoneAssignment]);
-      }
-      if (command === "list_microphone_waiting_states") {
-        return Promise.resolve([]);
-      }
-      if (command === "get_microphone_recovery_states") {
-        return Promise.resolve([held ? heldState : disconnectedRecoveryState]);
-      }
-      if (command === "leave_microphone_channel_assigned") {
-        held = true;
-        return Promise.resolve(heldState);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    await user.click(await screen.findByRole("button", { name: "Leave assigned" }));
-    expect(await screen.findByText(/Left assigned while/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.click(screen.getByRole("button", { name: "Microphones" }));
-
-    expect(await screen.findByText(/Left assigned while/)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Assigned singer" })).toHaveValue("singer-1");
-  });
-
-  it("checks Standard performance microphone readiness for assigned participants", async () => {
-    tauriMocks.invoke.mockImplementation(
-      (command: string, args?: { request?: { participantSingerIds?: string[] } }) => {
-        if (command === "discover_local_microphone_sources") {
-          return Promise.resolve(discoveredMicrophones);
-        }
-        if (command === "list_microphone_channels") {
-          return Promise.resolve([microphoneChannel]);
-        }
-        if (command === "sync_session_singers") {
-          return Promise.resolve([microphoneAssignment]);
-        }
-        if (command === "list_microphone_waiting_states") {
-          return Promise.resolve([]);
-        }
-        if (command === "evaluate_performance_microphone_readiness") {
-          expect(args).toEqual({
-            request: {
-              mode: "standard",
-              participantSingerIds: ["singer-1"],
-              allowAutomaticRecovery: true,
-              phase: "preparing",
-            },
-          });
-          return Promise.resolve(readyPerformanceMicrophoneReadiness);
-        }
-        return mockSuccessfulLibraryInvoke(command);
-      },
-    );
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    await user.click(await screen.findByRole("button", { name: "Check readiness" }));
-
-    expect(await screen.findByText(/Status: Ready/)).toBeInTheDocument();
-    expect(screen.getByText("Locked microphone participant: 1")).toBeInTheDocument();
-    expect(screen.getByText("Ready · Ready")).toBeInTheDocument();
-    expect(screen.getAllByText(`${microphoneChannel.id} · Available`).length).toBeGreaterThan(0);
-  });
-
-  it("shows diagnostic capture as a Performance readiness blocker", async () => {
-    const blockedReadiness: PerformanceMicrophoneReadiness = {
-      ...readyPerformanceMicrophoneReadiness,
-      status: "blocked",
-      message: "Stop diagnostic capture before preparing this Performance.",
-      lockedParticipants: [],
-      participants: [
-        {
-          ...readyPerformanceMicrophoneReadiness.participants[0],
-          status: "blocked",
-          reason: "diagnostic-session-active",
-          message: "A diagnostic capture session is using this microphone source.",
-          captureAvailable: false,
-        },
-      ],
-    };
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(discoveredMicrophones);
-      }
-      if (command === "list_microphone_channels") {
-        return Promise.resolve([microphoneChannel]);
-      }
-      if (command === "sync_session_singers") {
-        return Promise.resolve([microphoneAssignment]);
-      }
-      if (command === "list_microphone_waiting_states") {
-        return Promise.resolve([]);
-      }
-      if (command === "evaluate_performance_microphone_readiness") {
-        return Promise.resolve(blockedReadiness);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    await user.click(await screen.findByRole("button", { name: "Check readiness" }));
-
-    expect(await screen.findByText(/Status: Blocked/)).toBeInTheDocument();
-    expect(screen.getByText(/Diagnostic Session Active/)).toBeInTheDocument();
-    expect(
-      screen.getByText("A diagnostic capture session is using this microphone source."),
-    ).toBeInTheDocument();
-  });
-
-  it("refreshes visible channel and recovery state after readiness performs safe recovery", async () => {
-    const recoveredChannel = {
-      ...microphoneChannel,
-      sourceId: secondAvailableMicrophone.id,
-      sourceDisplayName: secondAvailableMicrophone.displayName,
-    };
-    const recoveredReadiness: PerformanceMicrophoneReadiness = {
-      ...readyPerformanceMicrophoneReadiness,
-      lockedParticipants: [
-        {
-          singerId: "singer-1",
-          channelId: recoveredChannel.id,
-          sourceId: recoveredChannel.sourceId,
-        },
-      ],
-      participants: [
-        {
-          ...readyPerformanceMicrophoneReadiness.participants[0],
-          channel: recoveredChannel,
-        },
-      ],
-    };
-    let recovered = false;
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve([secondAvailableMicrophone]);
-      }
-      if (command === "list_microphone_channels") {
-        return Promise.resolve([recovered ? recoveredChannel : disconnectedMicrophoneChannel]);
-      }
-      if (command === "sync_session_singers") {
-        return Promise.resolve([microphoneAssignment]);
-      }
-      if (command === "list_microphone_waiting_states") {
-        return Promise.resolve([]);
-      }
-      if (command === "get_microphone_recovery_states") {
-        return Promise.resolve(recovered ? [] : [disconnectedRecoveryState]);
-      }
-      if (command === "evaluate_performance_microphone_readiness") {
-        recovered = true;
-        return Promise.resolve(recoveredReadiness);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    expect(await screen.findByText("USB Microphone · Disconnected")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Check readiness" }));
-
-    expect(await screen.findByText("Desk Microphone · Available")).toBeInTheDocument();
-    expect(screen.getByText(/Status: Ready/)).toBeInTheDocument();
-  });
-
-  it("updates the visible registry after an automatic discovery refresh", async () => {
-    vi.useFakeTimers();
-    let discoveryCount = 0;
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        discoveryCount += 1;
-        return Promise.resolve(discoveryCount === 1 ? [] : discoveredMicrophones);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    render(<App />);
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Microphones" }));
-    expect(
-      screen.getByText("No available local microphone inputs were found."),
-    ).toBeInTheDocument();
-
-    await act(async () => {
-      vi.advanceTimersByTime(LOCAL_MICROPHONE_REFRESH_INTERVAL_MS);
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(screen.getByText("1 available local microphone input discovered.")).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { name: "USB Microphone" })).toHaveLength(1);
-  });
-
-  it("keeps the diagnostic meter idle until Start Test is explicitly used", async () => {
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(discoveredMicrophones);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    await screen.findByText("State: Idle");
-
-    expect(screen.getByRole("meter", { name: "RMS level" })).toHaveAttribute("aria-valuenow", "0");
-    expect(screen.getByRole("meter", { name: "Peak level" })).toHaveAttribute("aria-valuenow", "0");
-    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
-      "start_diagnostic_capture",
-      expect.anything(),
-    );
-  });
-
-  it("starts, updates normalized levels, reports clipping, and stops", async () => {
-    vi.useFakeTimers();
-    const levelSnapshot = activeCaptureSnapshot("windows-mic-primary", {
-      rms: 0.4,
-      peak: 0.995,
-      clipping: true,
-      sequence: 2,
-    });
-    tauriMocks.invoke.mockImplementation((command: string, args?: { sourceId?: string }) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(discoveredMicrophones);
-      }
-      if (command === "start_diagnostic_capture") {
-        return Promise.resolve(activeCaptureSnapshot(args?.sourceId));
-      }
-      if (command === "diagnostic_capture_snapshot") {
-        return Promise.resolve(levelSnapshot);
-      }
-      if (command === "stop_diagnostic_capture") {
-        return Promise.resolve(idleCaptureSnapshot);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    render(<App />);
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Microphones" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start Test" }));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(screen.getByText("State: Active")).toBeInTheDocument();
-
-    await act(async () => {
-      vi.advanceTimersByTime(DIAGNOSTIC_LEVEL_POLL_INTERVAL_MS);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(screen.getByRole("meter", { name: "RMS level" })).toHaveAttribute(
-      "aria-valuenow",
-      "0.4",
-    );
-    expect(screen.getByRole("meter", { name: "Peak level" })).toHaveAttribute(
-      "aria-valuenow",
-      "0.995",
-    );
-    expect(screen.getByText("Clipping detected")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Stop Test" }));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(screen.getByText("State: Idle")).toBeInTheDocument();
-  });
-
-  it("ignores a stale level snapshot after the session stops", async () => {
-    vi.useFakeTimers();
-    const pendingSnapshot = createDeferred<DiagnosticCaptureSnapshot>();
-    tauriMocks.invoke.mockImplementation((command: string, args?: { sourceId?: string }) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(discoveredMicrophones);
-      }
-      if (command === "start_diagnostic_capture") {
-        return Promise.resolve(activeCaptureSnapshot(args?.sourceId));
-      }
-      if (command === "diagnostic_capture_snapshot") {
-        return pendingSnapshot.promise;
-      }
-      if (command === "stop_diagnostic_capture") {
-        return Promise.resolve(idleCaptureSnapshot);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
-    render(<App />);
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Microphones" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start Test" }));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    await act(async () => {
-      vi.advanceTimersByTime(DIAGNOSTIC_LEVEL_POLL_INTERVAL_MS);
-      await Promise.resolve();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Stop Test" }));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    pendingSnapshot.resolve(
-      activeCaptureSnapshot("windows-mic-primary", {
-        rms: 0.8,
-        peak: 0.9,
-        clipping: false,
-        sequence: 9,
+    const singerOne = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
+      "article",
+    )[0];
+
+    await user.selectOptions(within(singerOne).getByLabelText("Microphone"), "windows-mic-primary");
+
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("create_microphone_channel", {
+        sourceId: "windows-mic-primary",
       }),
     );
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("assign_microphone_channel", {
+      channelId: expect.stringMatching(/^microphone-channel-/),
+      singerId: "singer-1",
     });
-
-    expect(screen.getByText("State: Idle")).toBeInTheDocument();
-    expect(screen.getByRole("meter", { name: "RMS level" })).toHaveAttribute("aria-valuenow", "0");
   });
 
-  it("stops active capture before changing microphone selection", async () => {
-    let currentCaptureSnapshot: DiagnosticCaptureSnapshot = idleCaptureSnapshot;
-    tauriMocks.invoke.mockImplementation((command: string, args?: { sourceId?: string }) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve([discoveredMicrophones[0], secondAvailableMicrophone]);
-      }
-      if (command === "start_diagnostic_capture") {
-        currentCaptureSnapshot = activeCaptureSnapshot(args?.sourceId);
-        return Promise.resolve(currentCaptureSnapshot);
-      }
-      if (command === "diagnostic_capture_snapshot") {
-        return Promise.resolve(currentCaptureSnapshot);
-      }
-      if (command === "stop_diagnostic_capture") {
-        currentCaptureSnapshot = idleCaptureSnapshot;
-        return Promise.resolve(currentCaptureSnapshot);
-      }
-      return mockSuccessfulLibraryInvoke(command);
+  it("changes an assigned singer microphone through source replacement", async () => {
+    mockMicrophoneWorkspace({
+      sources: [discoveredMicrophones[0], secondAvailableMicrophone],
+      channels: [microphoneChannel],
+      assignments: [microphoneAssignment],
     });
     const user = userEvent.setup();
     render(<App />);
 
     await openMicrophoneWorkspace(user);
-    await user.click(screen.getByRole("button", { name: "Start Test" }));
-    await screen.findByText("State: Active");
-    await user.selectOptions(screen.getByLabelText("Microphone"), "windows-mic-third");
+    const singerOne = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
+      "article",
+    )[0];
 
-    await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("stop_diagnostic_capture"));
-    expect(screen.getByLabelText("Microphone")).toHaveValue("windows-mic-third");
+    await user.selectOptions(within(singerOne).getByLabelText("Microphone"), "windows-mic-third");
+
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("replace_microphone_channel_source", {
+        channelId: microphoneChannel.id,
+        sourceId: secondAvailableMicrophone.id,
+      }),
+    );
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "unassign_microphone_channel",
+      expect.anything(),
+    );
   });
 
-  it("stops active capture when the diagnostic workspace closes", async () => {
-    tauriMocks.invoke.mockImplementation((command: string, args?: { sourceId?: string }) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(discoveredMicrophones);
-      }
-      if (command === "start_diagnostic_capture") {
-        return Promise.resolve(activeCaptureSnapshot(args?.sourceId));
-      }
-      return mockSuccessfulLibraryInvoke(command);
+  it("clears an assigned singer without removing the channel", async () => {
+    mockMicrophoneWorkspace({
+      channels: [microphoneChannel],
+      assignments: [microphoneAssignment],
     });
     const user = userEvent.setup();
     render(<App />);
 
     await openMicrophoneWorkspace(user);
-    await user.click(screen.getByRole("button", { name: "Start Test" }));
-    await screen.findByText("State: Active");
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    const singerOne = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
+      "article",
+    )[0];
 
-    await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("stop_diagnostic_capture"));
+    await user.selectOptions(within(singerOne).getByLabelText("Microphone"), "");
+
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("unassign_microphone_channel", {
+        channelId: microphoneChannel.id,
+      }),
+    );
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "remove_microphone_channel",
+      expect.anything(),
+    );
   });
 
-  it("stops active capture when the selected microphone disconnects", async () => {
-    vi.useFakeTimers();
-    let connected = true;
-    const active = activeCaptureSnapshot();
-    tauriMocks.invoke.mockImplementation((command: string, args?: { sourceId?: string }) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(connected ? discoveredMicrophones : []);
-      }
-      if (command === "start_diagnostic_capture") {
-        return Promise.resolve(activeCaptureSnapshot(args?.sourceId));
-      }
-      if (command === "diagnostic_capture_snapshot") {
-        return Promise.resolve(active);
-      }
-      if (command === "stop_diagnostic_capture") {
-        return Promise.resolve(idleCaptureSnapshot);
-      }
-      return mockSuccessfulLibraryInvoke(command);
-    });
+  it("keeps unavailable microphones out of normal choices while preserving the default indicator", async () => {
+    const unavailable = {
+      id: "windows-mic-offline",
+      displayName: "Offline Microphone",
+      kind: "windows-device" as const,
+      availability: "unavailable" as const,
+      isDefault: false,
+    };
+    mockMicrophoneWorkspace({ sources: [discoveredMicrophones[0], unavailable] });
+    const user = userEvent.setup();
     render(<App />);
 
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Microphones" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start Test" }));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await openMicrophoneWorkspace(user);
 
-    connected = false;
-    await act(async () => {
-      vi.advanceTimersByTime(LOCAL_MICROPHONE_REFRESH_INTERVAL_MS);
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(tauriMocks.invoke).toHaveBeenCalledWith("stop_diagnostic_capture");
-    expect(screen.getByText("State: Idle")).toBeInTheDocument();
+    const singerOne = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
+      "article",
+    )[0];
+    const selector = within(singerOne).getByLabelText("Microphone");
+    expect(
+      within(selector).getByRole("option", { name: "USB Microphone (Default)" }),
+    ).toBeInTheDocument();
+    expect(
+      within(selector).queryByRole("option", { name: "Offline Microphone" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("shows a failed state when capture cannot start", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    tauriMocks.invoke.mockImplementation((command: string) => {
-      if (command === "discover_local_microphone_sources") {
-        return Promise.resolve(discoveredMicrophones);
-      }
-      if (command === "start_diagnostic_capture") {
-        return Promise.reject(new Error("device busy"));
-      }
-      return mockSuccessfulLibraryInvoke(command);
+  it("shows a disconnected assigned microphone with plain recovery actions", async () => {
+    mockMicrophoneWorkspace({
+      sources: [secondAvailableMicrophone],
+      channels: [disconnectedMicrophoneChannel],
+      assignments: [microphoneAssignment],
+      recoveryStates: [disconnectedRecoveryState],
     });
     const user = userEvent.setup();
     render(<App />);
 
     await openMicrophoneWorkspace(user);
-    await user.click(screen.getByRole("button", { name: "Start Test" }));
+    const singerOne = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
+      "article",
+    )[0];
 
-    expect(await screen.findByText("State: Failed")).toBeInTheDocument();
-    expect(screen.getByText("Could not start the microphone test.")).toBeInTheDocument();
+    expect(within(singerOne).getByText("Disconnected")).toBeInTheDocument();
+    expect(within(singerOne).getByText("USB Microphone is disconnected.")).toBeInTheDocument();
+    expect(
+      within(singerOne).getByRole("option", { name: "USB Microphone (Disconnected)" }),
+    ).toBeDisabled();
+    expect(within(singerOne).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(within(singerOne).getByRole("button", { name: "Leave unassigned" })).toBeInTheDocument();
+    expect(within(singerOne).queryByText("replacement-available")).not.toBeInTheDocument();
+
+    await user.click(within(singerOne).getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("retry_microphone_channel_source", {
+        channelId: microphoneChannel.id,
+      }),
+    );
+  });
+
+  it("represents waiting and unassigned singers with public status language", async () => {
+    mockMicrophoneWorkspace({ waitingStates: [microphoneWaitingState] });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+
+    const rows = within(await screen.findByLabelText("Singer microphones")).getAllByRole("article");
+    expect(within(rows[0]).getByText("Waiting")).toBeInTheDocument();
+    expect(within(rows[0]).getByText(microphoneWaitingState.message)).toBeInTheDocument();
+    expect(within(rows[1]).getByText("Unassigned")).toBeInTheDocument();
+    expect(within(rows[1]).getByText("No microphone selected.")).toBeInTheDocument();
+  });
+
+  it("renders a simple input meter and starts capture only after Test microphone", async () => {
+    mockMicrophoneWorkspace({
+      channels: [microphoneChannel],
+      assignments: [microphoneAssignment],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    const singerOne = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
+      "article",
+    )[0];
+
+    expect(within(singerOne).getByRole("meter", { name: "Singer 1 input level" })).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "start_diagnostic_capture",
+      expect.anything(),
+    );
+
+    await user.click(within(singerOne).getByRole("button", { name: "Test microphone" }));
+
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("start_diagnostic_capture", {
+        sourceId: microphoneChannel.sourceId,
+      }),
+    );
+    expect(within(singerOne).queryByText(/RMS|Peak|Clipping|sequence/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps development controls accessible but outside the primary singer flow", async () => {
+    mockMicrophoneWorkspace();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+
+    const singerList = await screen.findByLabelText("Singer microphones");
+    expect(
+      within(singerList).queryByRole("button", { name: "Start Listener" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Developer diagnostics")).toBeInTheDocument();
+
+    await openDeveloperDiagnostics(user);
+
+    expect(screen.getByText(/INSECURE DEVELOPMENT CONNECTION/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Bind address")).toHaveValue("127.0.0.1");
+    expect(screen.getByLabelText("TCP port")).toHaveValue(45820);
+    expect(screen.getByLabelText("UDP port")).toHaveValue(45821);
+    expect(screen.getByText(/Listener: Stopped · TCP 45820 · UDP 45821/)).toBeInTheDocument();
+  });
+
+  it("passes edited development listener bind address and ports to the Host", async () => {
+    mockMicrophoneWorkspace();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    await openDeveloperDiagnostics(user);
+
+    await user.clear(screen.getByLabelText("Bind address"));
+    await user.type(screen.getByLabelText("Bind address"), "192.168.1.78");
+    await user.clear(screen.getByLabelText("TCP port"));
+    await user.type(screen.getByLabelText("TCP port"), "45920");
+    await user.clear(screen.getByLabelText("UDP port"));
+    await user.type(screen.getByLabelText("UDP port"), "45921");
+    await user.click(screen.getByRole("button", { name: "Start Listener" }));
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("start_development_protocol_listener", {
+      request: { bindAddress: "192.168.1.78", tcpPort: 45920, udpPort: 45921 },
+    });
+    expect(await screen.findByText(/Client: Android Test/)).toBeInTheDocument();
+  });
+
+  it("rejects invalid development listener ports before invoking the Host", async () => {
+    mockMicrophoneWorkspace();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    await openDeveloperDiagnostics(user);
+
+    await user.clear(screen.getByLabelText("TCP port"));
+    await user.type(screen.getByLabelText("TCP port"), "70000");
+    await user.click(screen.getByRole("button", { name: "Start Listener" }));
+
+    expect(screen.getByText("Ports must be whole numbers from 1 to 65535.")).toBeInTheDocument();
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "start_development_protocol_listener",
+      expect.anything(),
+    );
+  });
+
+  it("disables development listener fields while listening and renders the actual bound endpoint", async () => {
+    mockMicrophoneWorkspace({ developmentStatus: activeDevelopmentStatus });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    await openDeveloperDiagnostics(user);
+
+    expect(screen.getByLabelText("Bind address")).toBeDisabled();
+    expect(screen.getByLabelText("TCP port")).toBeDisabled();
+    expect(screen.getByLabelText("UDP port")).toBeDisabled();
+    expect(
+      screen.getByText(/Listener: Listening · TCP 45820 · UDP 45821 · 127.0.0.1/),
+    ).toBeInTheDocument();
+  });
+
+  it("does not duplicate listener start under React StrictMode", async () => {
+    mockMicrophoneWorkspace();
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+
+    await openMicrophoneWorkspace(user);
+    await openDeveloperDiagnostics(user);
+    await user.click(screen.getByRole("button", { name: "Start Listener" }));
+
+    await waitFor(() =>
+      expect(
+        tauriMocks.invoke.mock.calls.filter(
+          ([command]) => command === "start_development_protocol_listener",
+        ),
+      ).toHaveLength(1),
+    );
   });
 });
-
 describe("Library workspace", () => {
   it("shows the no-folder-selected state", async () => {
     const user = userEvent.setup();
