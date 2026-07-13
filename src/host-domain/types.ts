@@ -72,7 +72,10 @@ export type MicrophoneSource =
   | {
       id: MicrophoneSourceId;
       kind: "network-client";
-      clientId: ClientId;
+      displayName: string;
+      availability: MicrophoneSourceAvailability;
+      isDefault: false;
+      clientId: ClientId | null;
     }
   | {
       id: MicrophoneSourceId;

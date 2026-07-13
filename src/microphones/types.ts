@@ -6,7 +6,9 @@ import type {
   SessionSingerId,
 } from "../host-domain/types";
 
-export type LocalMicrophoneSource = Extract<MicrophoneSource, { kind: "windows-device" }>;
+export type LocalMicrophoneSource =
+  | Extract<MicrophoneSource, { kind: "windows-device" }>
+  | Extract<MicrophoneSource, { kind: "network-client" }>;
 
 export type MicrophoneDiscoveryState = {
   status: "loading" | "success" | "failure";
@@ -97,4 +99,60 @@ export type PerformanceMicrophoneReadiness = {
   participants: ParticipantMicrophoneReadiness[];
   lockedParticipants: LockedPerformanceMicrophone[];
   message: string;
+};
+
+export type DevelopmentListenerState = "stopped" | "starting" | "listening" | "failed";
+export type DevelopmentSourceHealth =
+  | "connected-not-authorized"
+  | "authorized-awaiting-audio"
+  | "healthy"
+  | "degraded"
+  | "disconnected"
+  | "failed";
+
+export type DevelopmentProtocolStatus = {
+  listenerState: DevelopmentListenerState;
+  bindAddress: string;
+  tcpPort: number;
+  udpPort: number;
+  connectedClientCount: number;
+  currentConnectionId: string | null;
+  currentSessionId: string | null;
+  connectedClientName: string | null;
+  sourceId: string | null;
+  streamAuthorized: boolean;
+  activeStreamId: number | null;
+  sourceHealth: DevelopmentSourceHealth;
+  lastHeartbeatAgeMs: number | null;
+  malformedControlMessages: number;
+  rejectedControlMessages: number;
+  closureReason: string | null;
+  error: string | null;
+};
+
+export type DevelopmentStreamDiagnostics = {
+  activeStreamId: number | null;
+  packetsReceived: number;
+  validPackets: number;
+  malformedPackets: number;
+  unauthorizedPackets: number;
+  duplicatePackets: number;
+  stalePackets: number;
+  latePackets: number;
+  sequenceGaps: number;
+  estimatedPacketLoss: number;
+  receiverQueueDepth: number;
+  maximumQueueDepth: number;
+  jitterWindowDepth: number;
+  jitterTargetMs: number;
+  jitterMaxMs: number;
+  currentSourceHealth: DevelopmentSourceHealth;
+  lastValidPacketAgeMs: number | null;
+  level: { rms: number; peak: number; clipping: boolean; sequence: number };
+};
+
+export type DevelopmentProtocolProjection = {
+  status: DevelopmentProtocolStatus;
+  diagnostics: DevelopmentStreamDiagnostics;
+  sources: LocalMicrophoneSource[];
 };

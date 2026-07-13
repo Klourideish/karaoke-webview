@@ -1,5 +1,5 @@
-mod backend;
-mod levels;
+pub(crate) mod backend;
+pub(crate) mod levels;
 mod manager;
 mod models;
 
@@ -10,7 +10,7 @@ mod tests;
 mod windows;
 
 pub(crate) use manager::DiagnosticCaptureManager;
-use models::DiagnosticCaptureSnapshot;
+pub(crate) use models::{DiagnosticCaptureSnapshot, MicrophoneLevelSnapshot};
 
 impl DiagnosticCaptureManager {
     pub(crate) fn occupied_source_for_readiness(&self) -> Option<String> {
@@ -29,8 +29,12 @@ pub(crate) fn diagnostic_capture_snapshot(
 pub(crate) fn start_diagnostic_capture(
     source_id: String,
     manager: tauri::State<'_, DiagnosticCaptureManager>,
+    development: tauri::State<
+        '_,
+        std::sync::Arc<crate::development_protocol::DevelopmentProtocolManager>,
+    >,
 ) -> Result<DiagnosticCaptureSnapshot, String> {
-    if !crate::microphones::is_local_microphone_available(&source_id)? {
+    if !crate::microphones::is_microphone_source_available(&source_id, Some(&development))? {
         return Err("The selected microphone is no longer available.".to_string());
     }
     Ok(manager.start(source_id))

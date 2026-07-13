@@ -22,7 +22,19 @@ pub(crate) trait CaptureBackend: Send + Sync {
     ) -> Result<CaptureEnd, String>;
 }
 
-pub(crate) struct PlatformCaptureBackend;
+pub(crate) struct PlatformCaptureBackend {
+    development: Option<std::sync::Arc<crate::development_protocol::DevelopmentProtocolManager>>,
+}
+
+impl PlatformCaptureBackend {
+    pub(crate) fn new(
+        development: Option<
+            std::sync::Arc<crate::development_protocol::DevelopmentProtocolManager>,
+        >,
+    ) -> Self {
+        Self { development }
+    }
+}
 
 impl CaptureBackend for PlatformCaptureBackend {
     fn run(
@@ -33,6 +45,11 @@ impl CaptureBackend for PlatformCaptureBackend {
         levels: Box<dyn Fn(MicrophoneLevelSnapshot) + Send>,
         timeout: Duration,
     ) -> Result<CaptureEnd, String> {
+        if source_id.starts_with("network-mic-") {
+            if let Some(development) = &self.development {
+                return development.run_capture(source_id, stop, ready, levels, timeout);
+            }
+        }
         platform_capture(source_id, stop, ready, levels, timeout)
     }
 }

@@ -42,8 +42,21 @@ pub(crate) struct DiagnosticCaptureManager {
 }
 
 impl DiagnosticCaptureManager {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
-        Self::with_backend(Arc::new(PlatformCaptureBackend), DIAGNOSTIC_CAPTURE_TIMEOUT)
+        Self::with_backend(
+            Arc::new(PlatformCaptureBackend::new(None)),
+            DIAGNOSTIC_CAPTURE_TIMEOUT,
+        )
+    }
+
+    pub(crate) fn with_development(
+        development: Arc<crate::development_protocol::DevelopmentProtocolManager>,
+    ) -> Self {
+        Self::with_backend(
+            Arc::new(PlatformCaptureBackend::new(Some(development))),
+            DIAGNOSTIC_CAPTURE_TIMEOUT,
+        )
     }
 
     #[cfg(test)]

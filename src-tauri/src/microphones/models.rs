@@ -12,6 +12,7 @@ pub enum KaraokeMode {
 #[serde(rename_all = "kebab-case")]
 pub enum MicrophoneSourceKind {
     WindowsDevice,
+    NetworkClient,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

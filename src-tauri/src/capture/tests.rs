@@ -96,7 +96,8 @@ fn diagnostic_session_starts_stops_and_preserves_its_channel() {
     let active = manager.start("windows-mic-a".to_string());
     assert_eq!(active.status, DiagnosticCaptureStatus::Active);
     assert_eq!(active.source_id.as_deref(), Some("windows-mic-a"));
-    assert_eq!(active.level.sequence, 1);
+    let level_sequence = wait_for_level_sequence(&manager);
+    assert_eq!(level_sequence, 1);
 
     assert_eq!(manager.stop().status, DiagnosticCaptureStatus::Idle);
     assert_eq!(manager.channel_count(), 1);
@@ -187,6 +188,17 @@ fn normalized_levels_are_idle_for_empty_samples() {
     assert_eq!(level.rms, 0.0);
     assert_eq!(level.peak, 0.0);
     assert!(!level.clipping);
+}
+
+fn wait_for_level_sequence(manager: &DiagnosticCaptureManager) -> u64 {
+    for _ in 0..20 {
+        let sequence = manager.snapshot().level.sequence;
+        if sequence > 0 {
+            return sequence;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    manager.snapshot().level.sequence
 }
 
 #[test]

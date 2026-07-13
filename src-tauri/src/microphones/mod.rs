@@ -14,13 +14,15 @@ pub(crate) mod windows;
 
 pub(crate) use assignment_registry::MicrophoneAssignmentRegistry;
 pub(crate) use channel_registry::MicrophoneChannelRegistry;
-pub(crate) use models::DiscoveredMicrophoneSource;
 use models::{
     AutomaticAssignmentResult, MicrophoneAssignment, MicrophoneChannel, MicrophoneRecoveryState,
     MicrophoneWaitingState, PerformanceMicrophoneReadiness, PerformanceMicrophoneReadinessRequest,
 };
+pub(crate) use models::{
+    DiscoveredMicrophoneSource, MicrophoneSourceAvailability, MicrophoneSourceKind,
+};
 pub(crate) use recovery::MicrophoneRecoveryRegistry;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 #[derive(Default)]
 pub(crate) struct MicrophoneRegistryOperations(Mutex<()>);
@@ -44,6 +46,32 @@ pub(crate) fn is_local_microphone_available(source_id: &str) -> Result<bool, Str
         .map_err(|error| error.to_string())
 }
 
+pub(crate) fn is_microphone_source_available(
+    source_id: &str,
+    development: Option<&Arc<crate::development_protocol::DevelopmentProtocolManager>>,
+) -> Result<bool, String> {
+    if is_local_microphone_available(source_id)? {
+        return Ok(true);
+    }
+    Ok(development.is_some_and(|manager| manager.is_source_available(source_id)))
+}
+
+fn discover_all_sources(
+    development: Option<&Arc<crate::development_protocol::DevelopmentProtocolManager>>,
+) -> Result<Vec<DiscoveredMicrophoneSource>, String> {
+    let mut sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
+    if let Some(manager) = development {
+        sources.extend(manager.sources());
+    }
+    sources.sort_by(|left, right| {
+        left.display_name
+            .to_lowercase()
+            .cmp(&right.display_name.to_lowercase())
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    Ok(sources)
+}
+
 #[cfg(test)]
 pub(crate) fn first_available_local_source_id() -> Result<Option<String>, String> {
     discovery::discover_local_sources()
@@ -63,9 +91,10 @@ pub(crate) fn discover_local_microphone_sources(
     registry: tauri::State<'_, MicrophoneChannelRegistry>,
     recovery: tauri::State<'_, MicrophoneRecoveryRegistry>,
     operations: tauri::State<'_, MicrophoneRegistryOperations>,
+    development: tauri::State<'_, Arc<crate::development_protocol::DevelopmentProtocolManager>>,
 ) -> Result<Vec<DiscoveredMicrophoneSource>, String> {
     let _operation = operations.lock();
-    let sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
+    let sources = discover_all_sources(Some(&development))?;
     registry.reconcile(&sources);
     recovery.reconcile(&sources, &registry.list());
     Ok(sources)
@@ -82,8 +111,9 @@ pub(crate) fn list_microphone_channels(
 pub(crate) fn create_microphone_channel(
     source_id: String,
     registry: tauri::State<'_, MicrophoneChannelRegistry>,
+    development: tauri::State<'_, Arc<crate::development_protocol::DevelopmentProtocolManager>>,
 ) -> Result<MicrophoneChannel, String> {
-    let sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
+    let sources = discover_all_sources(Some(&development))?;
     registry.create(&source_id, &sources)
 }
 
@@ -106,8 +136,9 @@ pub(crate) fn replace_microphone_channel_source(
     channel_id: String,
     source_id: String,
     registry: tauri::State<'_, MicrophoneChannelRegistry>,
+    development: tauri::State<'_, Arc<crate::development_protocol::DevelopmentProtocolManager>>,
 ) -> Result<MicrophoneChannel, String> {
-    let sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
+    let sources = discover_all_sources(Some(&development))?;
     registry.replace_source(&channel_id, &source_id, &sources)
 }
 
@@ -195,9 +226,10 @@ pub(crate) fn auto_assign_microphone_channel(
     channels: tauri::State<'_, MicrophoneChannelRegistry>,
     assignments: tauri::State<'_, MicrophoneAssignmentRegistry>,
     operations: tauri::State<'_, MicrophoneRegistryOperations>,
+    development: tauri::State<'_, Arc<crate::development_protocol::DevelopmentProtocolManager>>,
 ) -> Result<AutomaticAssignmentResult, String> {
     let _operation = operations.lock();
-    let sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
+    let sources = discover_all_sources(Some(&development))?;
     channels.reconcile(&sources);
     automatic_assignment::auto_assign(&singer_id, &sources, &channels, &assignments)
 }
@@ -227,9 +259,10 @@ pub(crate) fn get_microphone_recovery_states(
     channels: tauri::State<'_, MicrophoneChannelRegistry>,
     recovery: tauri::State<'_, MicrophoneRecoveryRegistry>,
     operations: tauri::State<'_, MicrophoneRegistryOperations>,
+    development: tauri::State<'_, Arc<crate::development_protocol::DevelopmentProtocolManager>>,
 ) -> Result<Vec<MicrophoneRecoveryState>, String> {
     let _operation = operations.lock();
-    let sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
+    let sources = discover_all_sources(Some(&development))?;
     channels.reconcile(&sources);
     recovery.reconcile(&sources, &channels.list());
     Ok(recovery.list())
@@ -241,21 +274,21 @@ pub(crate) fn retry_microphone_channel_source(
     channels: tauri::State<'_, MicrophoneChannelRegistry>,
     recovery: tauri::State<'_, MicrophoneRecoveryRegistry>,
     operations: tauri::State<'_, MicrophoneRegistryOperations>,
+    development: tauri::State<'_, Arc<crate::development_protocol::DevelopmentProtocolManager>>,
 ) -> Result<MicrophoneRecoveryState, String> {
     let _operation = operations.lock();
     require_persistent_channel(&channels, &channel_id)?;
     if recovery.get(&channel_id).is_none() {
-        let initial_sources =
-            discovery::discover_local_sources().map_err(|error| error.to_string())?;
+        let initial_sources = discover_all_sources(Some(&development))?;
         channels.reconcile(&initial_sources);
         recovery.reconcile(&initial_sources, &channels.list());
     }
     recovery.mark_recovering(&channel_id)?;
-    let sources = match discovery::discover_local_sources() {
+    let sources = match discover_all_sources(Some(&development)) {
         Ok(sources) => sources,
         Err(error) => {
             recovery.mark_discovery_failed(&channel_id)?;
-            return Err(error.to_string());
+            return Err(error);
         }
     };
     channels.reconcile(&sources);
@@ -277,10 +310,11 @@ pub(crate) fn replace_disconnected_microphone_channel_source(
     channels: tauri::State<'_, MicrophoneChannelRegistry>,
     recovery: tauri::State<'_, MicrophoneRecoveryRegistry>,
     operations: tauri::State<'_, MicrophoneRegistryOperations>,
+    development: tauri::State<'_, Arc<crate::development_protocol::DevelopmentProtocolManager>>,
 ) -> Result<MicrophoneChannel, String> {
     let _operation = operations.lock();
     require_persistent_channel(&channels, &channel_id)?;
-    let sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
+    let sources = discover_all_sources(Some(&development))?;
     channels.reconcile(&sources);
     recovery.reconcile(&sources, &channels.list());
     let state = recovery
@@ -322,9 +356,10 @@ pub(crate) fn evaluate_performance_microphone_readiness(
     recovery: tauri::State<'_, MicrophoneRecoveryRegistry>,
     capture: tauri::State<'_, crate::capture::DiagnosticCaptureManager>,
     operations: tauri::State<'_, MicrophoneRegistryOperations>,
+    development: tauri::State<'_, Arc<crate::development_protocol::DevelopmentProtocolManager>>,
 ) -> Result<PerformanceMicrophoneReadiness, String> {
     let _operation = operations.lock();
-    let sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
+    let sources = discover_all_sources(Some(&development))?;
     performance_readiness::evaluate(
         &request,
         &sources,

@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { LyricDocument } from "./lyrics";
 import type { LibraryScanResult, MediaSong } from "./media-library/types";
-import type { LocalMicrophoneSource, PerformanceMicrophoneReadiness } from "./microphones/types";
+import type {
+  DevelopmentProtocolStatus,
+  DevelopmentStreamDiagnostics,
+  LocalMicrophoneSource,
+  PerformanceMicrophoneReadiness,
+} from "./microphones/types";
 import type { DiagnosticCaptureSnapshot } from "./microphones/diagnosticCapture";
 import { DIAGNOSTIC_LEVEL_POLL_INTERVAL_MS } from "./microphones/useDiagnosticCapture";
 import { LOCAL_MICROPHONE_REFRESH_INTERVAL_MS } from "./microphones/useLocalMicrophones";
@@ -193,6 +198,59 @@ const readyPerformanceMicrophoneReadiness: PerformanceMicrophoneReadiness = {
   ],
 };
 
+const stoppedDevelopmentStatus: DevelopmentProtocolStatus = {
+  listenerState: "stopped",
+  bindAddress: "127.0.0.1",
+  tcpPort: 45820,
+  udpPort: 45821,
+  connectedClientCount: 0,
+  currentConnectionId: null,
+  currentSessionId: null,
+  connectedClientName: null,
+  sourceId: null,
+  streamAuthorized: false,
+  activeStreamId: null,
+  sourceHealth: "disconnected",
+  lastHeartbeatAgeMs: null,
+  malformedControlMessages: 0,
+  rejectedControlMessages: 0,
+  closureReason: null,
+  error: null,
+};
+
+const activeDevelopmentStatus: DevelopmentProtocolStatus = {
+  ...stoppedDevelopmentStatus,
+  listenerState: "listening",
+  connectedClientCount: 1,
+  currentConnectionId: "development-connection-1",
+  currentSessionId: "development-session-1",
+  connectedClientName: "Android Test",
+  sourceId: "network-mic-development-1",
+  streamAuthorized: true,
+  activeStreamId: 1,
+  sourceHealth: "healthy",
+};
+
+const idleDevelopmentDiagnostics: DevelopmentStreamDiagnostics = {
+  activeStreamId: null,
+  packetsReceived: 0,
+  validPackets: 0,
+  malformedPackets: 0,
+  unauthorizedPackets: 0,
+  duplicatePackets: 0,
+  stalePackets: 0,
+  latePackets: 0,
+  sequenceGaps: 0,
+  estimatedPacketLoss: 0,
+  receiverQueueDepth: 0,
+  maximumQueueDepth: 0,
+  jitterWindowDepth: 0,
+  jitterTargetMs: 30,
+  jitterMaxMs: 60,
+  currentSourceHealth: "disconnected",
+  lastValidPacketAgeMs: null,
+  level: { rms: 0, peak: 0, clipping: false, sequence: 0 },
+};
 const idleCaptureSnapshot: DiagnosticCaptureSnapshot = {
   status: "idle",
   sessionId: null,
@@ -341,6 +399,34 @@ function mockInvokeWith({
         return Promise.resolve([]);
       }
 
+      if (command === "get_development_protocol_status") {
+        return Promise.resolve(stoppedDevelopmentStatus);
+      }
+
+      if (command === "get_development_stream_diagnostics") {
+        return Promise.resolve(idleDevelopmentDiagnostics);
+      }
+
+      if (command === "start_development_protocol_listener") {
+        return Promise.resolve({
+          status: activeDevelopmentStatus,
+          diagnostics: { ...idleDevelopmentDiagnostics, activeStreamId: 1 },
+          sources: [],
+        });
+      }
+
+      if (command === "stop_development_protocol_listener") {
+        return Promise.resolve({
+          status: stoppedDevelopmentStatus,
+          diagnostics: idleDevelopmentDiagnostics,
+          sources: [],
+        });
+      }
+
+      if (command === "list_development_network_sources") {
+        return Promise.resolve([]);
+      }
+
       if (command === "list_microphone_channels") {
         return Promise.resolve([]);
       }
@@ -400,6 +486,34 @@ function mockSuccessfulLibraryInvoke(command: string) {
   }
 
   if (command === "discover_local_microphone_sources") {
+    return Promise.resolve([]);
+  }
+
+  if (command === "get_development_protocol_status") {
+    return Promise.resolve(stoppedDevelopmentStatus);
+  }
+
+  if (command === "get_development_stream_diagnostics") {
+    return Promise.resolve(idleDevelopmentDiagnostics);
+  }
+
+  if (command === "start_development_protocol_listener") {
+    return Promise.resolve({
+      status: activeDevelopmentStatus,
+      diagnostics: idleDevelopmentDiagnostics,
+      sources: [],
+    });
+  }
+
+  if (command === "stop_development_protocol_listener") {
+    return Promise.resolve({
+      status: stoppedDevelopmentStatus,
+      diagnostics: idleDevelopmentDiagnostics,
+      sources: [],
+    });
+  }
+
+  if (command === "list_development_network_sources") {
     return Promise.resolve([]);
   }
 
@@ -588,6 +702,34 @@ describe("Microphone workspace", () => {
     expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
   });
 
+  it("renders insecure development listener controls and starts/stops explicitly", async () => {
+    const user = userEvent.setup();
+    tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "discover_local_microphone_sources") {
+        return Promise.resolve([]);
+      }
+      return mockSuccessfulLibraryInvoke(command);
+    });
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+
+    expect(await screen.findByText(/INSECURE DEVELOPMENT CONNECTION/)).toBeInTheDocument();
+    expect(screen.getByText(/Listener: Stopped · TCP 45820 · UDP 45821/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Start Listener" }));
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("start_development_protocol_listener", {
+      request: {},
+    });
+    expect(await screen.findByText(/Client: Android Test/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Stop Listener" }));
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("stop_development_protocol_listener");
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "create_microphone_channel",
+      expect.anything(),
+    );
+  });
   it("renders available sources, hides unavailable sources, and keeps the default visible", async () => {
     tauriMocks.invoke.mockImplementation((command: string) => {
       if (command === "discover_local_microphone_sources") {
@@ -605,7 +747,7 @@ describe("Microphone workspace", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByRole("heading", { name: "USB Microphone" })).toHaveLength(1);
     expect(screen.getByText("Default input")).toBeInTheDocument();
-    expect(screen.getByText("Available")).toBeInTheDocument();
+    expect(screen.getByText("Available · Windows input")).toBeInTheDocument();
     expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
   });
 
@@ -1502,12 +1644,21 @@ describe("Microphone workspace", () => {
   });
 
   it("stops active capture before changing microphone selection", async () => {
+    let currentCaptureSnapshot: DiagnosticCaptureSnapshot = idleCaptureSnapshot;
     tauriMocks.invoke.mockImplementation((command: string, args?: { sourceId?: string }) => {
       if (command === "discover_local_microphone_sources") {
         return Promise.resolve([discoveredMicrophones[0], secondAvailableMicrophone]);
       }
       if (command === "start_diagnostic_capture") {
-        return Promise.resolve(activeCaptureSnapshot(args?.sourceId));
+        currentCaptureSnapshot = activeCaptureSnapshot(args?.sourceId);
+        return Promise.resolve(currentCaptureSnapshot);
+      }
+      if (command === "diagnostic_capture_snapshot") {
+        return Promise.resolve(currentCaptureSnapshot);
+      }
+      if (command === "stop_diagnostic_capture") {
+        currentCaptureSnapshot = idleCaptureSnapshot;
+        return Promise.resolve(currentCaptureSnapshot);
       }
       return mockSuccessfulLibraryInvoke(command);
     });

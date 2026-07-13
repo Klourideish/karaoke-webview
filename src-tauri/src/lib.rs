@@ -1,12 +1,18 @@
 mod capture;
+mod development_protocol;
 mod lyrics;
 mod media_library;
 mod microphones;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let development_protocol =
+        std::sync::Arc::new(development_protocol::DevelopmentProtocolManager::new());
     tauri::Builder::default()
-        .manage(capture::DiagnosticCaptureManager::new())
+        .manage(std::sync::Arc::clone(&development_protocol))
+        .manage(capture::DiagnosticCaptureManager::with_development(
+            development_protocol,
+        ))
         .manage(microphones::MicrophoneAssignmentRegistry::default())
         .manage(microphones::MicrophoneChannelRegistry::default())
         .manage(microphones::MicrophoneRecoveryRegistry::default())
@@ -16,6 +22,8 @@ pub fn run() {
             capture::diagnostic_capture_snapshot,
             capture::start_diagnostic_capture,
             capture::stop_diagnostic_capture,
+            development_protocol::get_development_protocol_status,
+            development_protocol::get_development_stream_diagnostics,
             microphones::assign_microphone_channel,
             microphones::auto_assign_microphone_channel,
             microphones::clear_microphone_waiting_state,
@@ -27,6 +35,7 @@ pub fn run() {
             microphones::evaluate_performance_microphone_readiness,
             microphones::get_microphone_recovery_states,
             microphones::leave_microphone_channel_assigned,
+            development_protocol::list_development_network_sources,
             microphones::list_microphone_channels,
             microphones::list_microphone_assignments,
             microphones::list_microphone_waiting_states,
@@ -39,6 +48,8 @@ pub fn run() {
             media_library::save_library_index,
             media_library::save_library_root,
             media_library::scan_media_library,
+            development_protocol::start_development_protocol_listener,
+            development_protocol::stop_development_protocol_listener,
             microphones::sync_session_singers,
             microphones::unassign_microphone_channel
         ])

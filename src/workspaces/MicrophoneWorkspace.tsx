@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import type { Singer } from "../app/SingerBar";
 import type { KaraokeMode } from "../host-domain/types";
 import { useDiagnosticCapture } from "../microphones/useDiagnosticCapture";
+import { useDevelopmentProtocol } from "../microphones/useDevelopmentProtocol";
 import type { useLocalMicrophones } from "../microphones/useLocalMicrophones";
 import { useMicrophoneChannels } from "../microphones/useMicrophoneChannels";
 import type { useMicrophoneAssignments } from "../microphones/useMicrophoneAssignments";
@@ -25,6 +26,8 @@ export function MicrophoneWorkspace({
   const channelRegistry = useMicrophoneChannels(discovery.sources);
   const recovery = useMicrophoneRecovery(discovery.sources, channelRegistry.channels);
   const readiness = usePerformanceMicrophoneReadiness();
+  const development = useDevelopmentProtocol();
+  const refreshDiscovery = discovery.refresh;
   const usedSourceIds = useMemo(
     () => new Set(channelRegistry.channels.map((channel) => channel.sourceId)),
     [channelRegistry.channels],
@@ -42,6 +45,12 @@ export function MicrophoneWorkspace({
     stop: stopCapture,
   } = useDiagnosticCapture();
   const selectId = useId();
+  useEffect(() => {
+    if (development.status.sourceId) {
+      void refreshDiscovery();
+    }
+  }, [development.status.sourceId, refreshDiscovery]);
+
   const selectedSource = useMemo(
     () => availableSources.find((source) => source.id === selectedSourceId) ?? null,
     [availableSources, selectedSourceId],
@@ -100,7 +109,7 @@ export function MicrophoneWorkspace({
     <section className="view-panel microphone-workspace" aria-labelledby="view-heading">
       <div className="microphone-header">
         <div className="view-heading-group">
-          <p className="region-label">Local inputs</p>
+          <p className="region-label">Input sources</p>
           <h2 id="view-heading">Microphones</h2>
         </div>
         <button
@@ -116,6 +125,68 @@ export function MicrophoneWorkspace({
       <p className="view-description">
         Discovered sources are not opened, assigned, or verified as ready for capture.
       </p>
+
+      <section className="microphone-test-panel" aria-labelledby="development-protocol-heading">
+        <div>
+          <p className="region-label">Development protocol</p>
+          <h3 id="development-protocol-heading">Network microphone receiver</h3>
+        </div>
+        <p className="microphone-error" role="note">
+          INSECURE DEVELOPMENT CONNECTION - local synthetic and Android-style testing only.
+        </p>
+        <div className="microphone-test-actions">
+          <button
+            className="microphone-test-button"
+            type="button"
+            disabled={
+              development.pendingAction !== null || development.status.listenerState === "listening"
+            }
+            onClick={async () => {
+              await development.start();
+              await discovery.refresh();
+            }}
+          >
+            Start Listener
+          </button>
+          <button
+            className="microphone-test-button"
+            type="button"
+            disabled={
+              development.pendingAction !== null || development.status.listenerState === "stopped"
+            }
+            onClick={async () => {
+              await development.stop();
+              await stopCapture();
+              await discovery.refresh();
+            }}
+          >
+            Stop Listener
+          </button>
+        </div>
+        <div className="microphone-capture-status" aria-live="polite">
+          <p>
+            Listener: {developmentStatusLabel(development.status.listenerState)} · TCP{" "}
+            {development.status.tcpPort} · UDP {development.status.udpPort} ·{" "}
+            {development.status.bindAddress}
+          </p>
+          <p>
+            Client: {development.status.connectedClientName ?? "None"} · Source:{" "}
+            {development.status.sourceId ?? "None"} · Stream:{" "}
+            {development.status.activeStreamId ?? "None"}
+          </p>
+          <p>
+            Health: {developmentStatusLabel(development.status.sourceHealth)} · Valid packets:{" "}
+            {development.diagnostics.validPackets} · Gaps: {development.diagnostics.sequenceGaps} ·
+            Queue: {development.diagnostics.receiverQueueDepth}/
+            {development.diagnostics.maximumQueueDepth}
+          </p>
+        </div>
+        {development.error || development.status.error ? (
+          <p className="microphone-error" role="alert">
+            {development.error ?? development.status.error}
+          </p>
+        ) : null}
+      </section>
 
       <div className="microphone-status" aria-live="polite">
         {isLoading ? <p>Discovering local microphone inputs...</p> : null}
@@ -136,12 +207,15 @@ export function MicrophoneWorkspace({
       </div>
 
       {availableSources.length > 0 ? (
-        <ul className="microphone-source-list" aria-label="Discovered microphone inputs">
+        <ul className="microphone-source-list" aria-label="Discovered microphone sources">
           {availableSources.map((source) => (
             <li className="microphone-source-row" key={source.id}>
               <div>
                 <h3>{source.displayName}</h3>
-                <p>Available</p>
+                <p>
+                  Available ·{" "}
+                  {source.kind === "network-client" ? "Development network" : "Windows input"}
+                </p>
               </div>
               <div className="microphone-source-actions">
                 {source.isDefault ? (
@@ -557,6 +631,13 @@ function readinessStatusLabel(status: "ready" | "degraded" | "blocked") {
 
 function readinessReasonLabel(reason: string) {
   return reason
+    .split("-")
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function developmentStatusLabel(status: string) {
+  return status
     .split("-")
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
