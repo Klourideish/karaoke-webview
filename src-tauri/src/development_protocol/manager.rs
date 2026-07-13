@@ -1,7 +1,10 @@
 use std::{
-    io::{BufRead, BufReader, Write},
-    net::{TcpListener, TcpStream, UdpSocket},
-    sync::{mpsc, Arc, Mutex},
+    io::{Read, Write},
+    net::{Shutdown, TcpListener, TcpStream, UdpSocket},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Mutex,
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -29,6 +32,8 @@ const JITTER_MAX_MS: u64 = 60;
 const JITTER_MAX_PACKETS: usize = 6;
 
 struct ListenerWorkers {
+    shutdown: Arc<AtomicBool>,
+    active_control: Arc<Mutex<Option<TcpStream>>>,
     stop_tcp: mpsc::Sender<()>,
     stop_udp: mpsc::Sender<()>,
     tcp_worker: JoinHandle<()>,
@@ -161,15 +166,43 @@ impl DevelopmentProtocolManager {
         udp_socket
             .set_read_timeout(Some(Duration::from_millis(100)))
             .map_err(|error| format!("Could not configure development UDP listener: {error}"))?;
+        let actual_tcp_port = tcp_listener
+            .local_addr()
+            .map(|addr| addr.port())
+            .unwrap_or(tcp_port);
+        let actual_udp_port = udp_socket
+            .local_addr()
+            .map(|addr| addr.port())
+            .unwrap_or(udp_port);
+        {
+            let mut inner = lock(&self.inner);
+            inner.tcp_port = actual_tcp_port;
+            inner.udp_port = actual_udp_port;
+        }
         let (stop_tcp, stop_tcp_rx) = mpsc::channel();
         let (stop_udp, stop_udp_rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let active_control = Arc::new(Mutex::new(None));
         let tcp_inner = Arc::clone(&self.inner);
-        let tcp_worker =
-            thread::spawn(move || run_tcp_listener(tcp_listener, tcp_inner, stop_tcp_rx));
+        let tcp_shutdown = Arc::clone(&shutdown);
+        let tcp_active_control = Arc::clone(&active_control);
+        let tcp_worker = thread::spawn(move || {
+            run_tcp_listener(
+                tcp_listener,
+                tcp_inner,
+                stop_tcp_rx,
+                tcp_shutdown,
+                tcp_active_control,
+            )
+        });
         let udp_inner = Arc::clone(&self.inner);
-        let udp_worker =
-            thread::spawn(move || run_udp_listener(udp_socket, udp_inner, stop_udp_rx));
+        let udp_shutdown = Arc::clone(&shutdown);
+        let udp_worker = thread::spawn(move || {
+            run_udp_listener(udp_socket, udp_inner, stop_udp_rx, udp_shutdown)
+        });
         *lock(&self.workers) = Some(ListenerWorkers {
+            shutdown,
+            active_control,
             stop_tcp,
             stop_udp,
             tcp_worker,
@@ -181,17 +214,9 @@ impl DevelopmentProtocolManager {
 
     pub(crate) fn stop(&self) -> DevelopmentProtocolProjection {
         let _operation = lock(&self.operations);
+        self.clear_runtime_state("development-listener-stopped");
         self.stop_workers();
-        {
-            let mut inner = lock(&self.inner);
-            inner.listener_state = DevelopmentListenerState::Stopped;
-            inner.connection = None;
-            inner.stream = None;
-            inner.meter = None;
-            inner.jitter.clear();
-            inner.closure_reason = Some("development-listener-stopped".to_string());
-            inner.level = MicrophoneLevelSnapshot::idle();
-        }
+        lock(&self.inner).listener_state = DevelopmentListenerState::Stopped;
         self.projection()
     }
 
@@ -282,8 +307,22 @@ impl DevelopmentProtocolManager {
         inner.error = Some(message);
     }
 
+    fn clear_runtime_state(&self, reason: &str) {
+        let mut inner = lock(&self.inner);
+        inner.connection = None;
+        inner.stream = None;
+        inner.meter = None;
+        inner.jitter.clear();
+        inner.closure_reason = Some(reason.to_string());
+        inner.level = MicrophoneLevelSnapshot::idle();
+    }
+
     fn stop_workers(&self) {
         if let Some(workers) = lock(&self.workers).take() {
+            workers.shutdown.store(true, Ordering::SeqCst);
+            if let Some(stream) = lock(&workers.active_control).take() {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
             let _ = workers.stop_tcp.send(());
             let _ = workers.stop_udp.send(());
             let _ = workers.tcp_worker.join();
@@ -300,10 +339,16 @@ impl DevelopmentProtocolManager {
     pub(crate) fn handle_udp_for_test(&self, datagram: &[u8]) {
         handle_udp_datagram(&self.inner, datagram);
     }
+
+    #[cfg(test)]
+    pub(crate) fn has_workers_for_test(&self) -> bool {
+        lock(&self.workers).is_some()
+    }
 }
 
 impl Drop for DevelopmentProtocolManager {
     fn drop(&mut self) {
+        self.clear_runtime_state("development-listener-dropped");
         self.stop_workers();
     }
 }
@@ -311,13 +356,21 @@ fn run_tcp_listener(
     listener: TcpListener,
     inner: Arc<Mutex<ManagerInner>>,
     stop: mpsc::Receiver<()>,
+    shutdown: Arc<AtomicBool>,
+    active_control: Arc<Mutex<Option<TcpStream>>>,
 ) {
     loop {
-        if stop.try_recv().is_ok() {
+        if shutdown.load(Ordering::SeqCst) || stop.try_recv().is_ok() {
             break;
         }
         match listener.accept() {
-            Ok((stream, _)) => handle_stream(stream, &inner),
+            Ok((stream, _)) => {
+                if shutdown.load(Ordering::SeqCst) {
+                    let _ = stream.shutdown(Shutdown::Both);
+                    break;
+                }
+                handle_stream(stream, &inner, &shutdown, &active_control);
+            }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(50));
             }
@@ -331,24 +384,61 @@ fn run_tcp_listener(
     }
 }
 
-fn handle_stream(mut stream: TcpStream, inner: &Arc<Mutex<ManagerInner>>) {
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
-    let Ok(reader_stream) = stream.try_clone() else {
-        return;
-    };
-    let mut reader = BufReader::new(reader_stream);
+fn handle_stream(
+    mut stream: TcpStream,
+    inner: &Arc<Mutex<ManagerInner>>,
+    shutdown: &Arc<AtomicBool>,
+    active_control: &Arc<Mutex<Option<TcpStream>>>,
+) {
+    let _ = stream.set_nonblocking(true);
+    if let Ok(active_stream) = stream.try_clone() {
+        *lock(active_control) = Some(active_stream);
+    }
+    let mut pending = Vec::with_capacity(1024);
+    let mut buffer = [0u8; 1024];
     loop {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
+        if shutdown.load(Ordering::SeqCst) {
+            revoke_connection(inner, "development-listener-stopped");
+            break;
+        }
+        match stream.read(&mut buffer) {
             Ok(0) => {
                 revoke_connection(inner, "control-connection-closed");
                 break;
             }
-            Ok(_) => {
-                if let Some(response) = handle_control_line(inner, line.trim_end()) {
-                    if let Ok(serialized) = serde_json::to_string(&response) {
-                        let _ = writeln!(stream, "{serialized}");
+            Ok(size) => {
+                pending.extend_from_slice(&buffer[..size]);
+                while let Some(newline) = pending.iter().position(|byte| *byte == b'\n') {
+                    let mut line = pending.drain(..=newline).collect::<Vec<_>>();
+                    while matches!(line.last(), Some(b'\n' | b'\r')) {
+                        line.pop();
                     }
+                    if line.is_empty() {
+                        continue;
+                    }
+                    let Ok(line) = std::str::from_utf8(&line) else {
+                        lock(inner).counters.malformed_control_messages += 1;
+                        let response = HostControlMessage::DevelopmentError {
+                            profile_version: 0,
+                            reason_code: "malformed-json".to_string(),
+                            message: "Malformed development control message.".to_string(),
+                        };
+                        write_host_response(&mut stream, &response);
+                        continue;
+                    };
+                    if let Some(response) = handle_control_line(inner, line) {
+                        write_host_response(&mut stream, &response);
+                    }
+                }
+                if pending.len() > 16 * 1024 {
+                    lock(inner).counters.malformed_control_messages += 1;
+                    pending.clear();
+                    let response = HostControlMessage::DevelopmentError {
+                        profile_version: 0,
+                        reason_code: "control-line-too-large".to_string(),
+                        message: "Development control message is too large.".to_string(),
+                    };
+                    write_host_response(&mut stream, &response);
                 }
             }
             Err(error)
@@ -362,12 +452,20 @@ fn handle_stream(mut stream: TcpStream, inner: &Arc<Mutex<ManagerInner>>) {
                     revoke_connection(inner, "heartbeat-timeout");
                     break;
                 }
+                thread::sleep(Duration::from_millis(10));
             }
             Err(_) => {
                 revoke_connection(inner, "control-read-error");
                 break;
             }
         }
+    }
+    *lock(active_control) = None;
+}
+
+fn write_host_response(stream: &mut TcpStream, response: &HostControlMessage) {
+    if let Ok(serialized) = serde_json::to_string(response) {
+        let _ = writeln!(stream, "{serialized}");
     }
 }
 
@@ -521,10 +619,15 @@ fn handle_control_line(inner: &Arc<Mutex<ManagerInner>>, line: &str) -> Option<H
         }
     }
 }
-fn run_udp_listener(socket: UdpSocket, inner: Arc<Mutex<ManagerInner>>, stop: mpsc::Receiver<()>) {
+fn run_udp_listener(
+    socket: UdpSocket,
+    inner: Arc<Mutex<ManagerInner>>,
+    stop: mpsc::Receiver<()>,
+    shutdown: Arc<AtomicBool>,
+) {
     let mut buffer = [0u8; 1500];
     loop {
-        if stop.try_recv().is_ok() {
+        if shutdown.load(Ordering::SeqCst) || stop.try_recv().is_ok() {
             break;
         }
         match socket.recv_from(&mut buffer) {
@@ -717,7 +820,11 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{
+        io::{BufRead, BufReader, Write},
+        net::{TcpStream, UdpSocket},
+        time::{Duration, Instant},
+    };
 
     use super::*;
     use crate::development_protocol::packet::build_test_packet;
@@ -731,6 +838,93 @@ mod tests {
         manager.handle_control_line_for_test(
             r#"{"type":"request_stream_authorization","profileVersion":0,"captureAttemptId":"attempt-1"}"#,
         );
+    }
+
+    fn test_request() -> StartDevelopmentProtocolRequest {
+        StartDevelopmentProtocolRequest {
+            bind_address: Some("127.0.0.1".to_string()),
+            tcp_port: Some(0),
+            udp_port: Some(0),
+        }
+    }
+
+    struct TestControlClient {
+        reader: BufReader<TcpStream>,
+        writer: TcpStream,
+    }
+
+    impl TestControlClient {
+        fn write(&mut self, message: &str) {
+            writeln!(self.writer, "{message}").unwrap();
+            self.writer.flush().unwrap();
+        }
+
+        fn read_line(&mut self) -> String {
+            let mut line = String::new();
+            self.reader.read_line(&mut line).unwrap();
+            line
+        }
+    }
+
+    fn connect_to_listener(manager: &DevelopmentProtocolManager) -> TestControlClient {
+        let projection = manager.projection();
+        let stream = TcpStream::connect(("127.0.0.1", projection.status.tcp_port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let reader_stream = stream.try_clone().unwrap();
+        TestControlClient {
+            reader: BufReader::new(reader_stream),
+            writer: stream,
+        }
+    }
+
+    fn wait_until(timeout: Duration, condition: impl Fn() -> bool) -> bool {
+        let started = Instant::now();
+        while started.elapsed() < timeout {
+            if condition() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        condition()
+    }
+
+    fn stop_within(
+        manager: &DevelopmentProtocolManager,
+        timeout: Duration,
+    ) -> DevelopmentProtocolProjection {
+        let started = Instant::now();
+        let projection = manager.stop();
+        assert!(
+            started.elapsed() < timeout,
+            "development protocol stop exceeded {:?}",
+            timeout
+        );
+        projection
+    }
+
+    fn connect_and_authorize(manager: &DevelopmentProtocolManager) -> TestControlClient {
+        let mut stream = connect_to_listener(manager);
+        stream.write(hello());
+        let hello_response = stream.read_line();
+        assert!(hello_response.contains("host_hello_accepted"));
+        stream.write(
+            r#"{"type":"request_stream_authorization","profileVersion":0,"captureAttemptId":"attempt-1"}"#,
+        );
+        let authorize_response = stream.read_line();
+        assert!(
+            authorize_response.contains("stream_authorized"),
+            "unexpected stream authorization response: {authorize_response}"
+        );
+        assert!(wait_until(Duration::from_secs(1), || manager
+            .projection()
+            .status
+            .stream_authorized));
+        stream
     }
 
     #[test]
@@ -887,5 +1081,163 @@ mod tests {
         let manager = DevelopmentProtocolManager::new();
         manager.handle_control_line_for_test(hello());
         assert_eq!(manager.sources().len(), 1);
+    }
+
+    #[test]
+    fn listener_shutdown_start_stop_is_idempotent() {
+        let manager = DevelopmentProtocolManager::new();
+        let projection = manager.start(test_request()).unwrap();
+        assert_eq!(
+            projection.status.listener_state,
+            DevelopmentListenerState::Listening
+        );
+        assert!(manager.has_workers_for_test());
+
+        let projection = stop_within(&manager, Duration::from_secs(1));
+        assert_eq!(
+            projection.status.listener_state,
+            DevelopmentListenerState::Stopped
+        );
+        assert_eq!(
+            projection.status.closure_reason.as_deref(),
+            Some("development-listener-stopped")
+        );
+        assert!(!manager.has_workers_for_test());
+
+        let projection = stop_within(&manager, Duration::from_secs(1));
+        assert_eq!(
+            projection.status.listener_state,
+            DevelopmentListenerState::Stopped
+        );
+        assert!(!manager.has_workers_for_test());
+    }
+
+    #[test]
+    fn listener_shutdown_start_stop_start_stop_releases_workers() {
+        let manager = DevelopmentProtocolManager::new();
+        for _ in 0..2 {
+            manager.start(test_request()).unwrap();
+            assert!(manager.has_workers_for_test());
+            stop_within(&manager, Duration::from_secs(1));
+            assert!(!manager.has_workers_for_test());
+        }
+    }
+
+    #[test]
+    fn listener_shutdown_with_no_client_connected_stops_cleanly() {
+        let manager = DevelopmentProtocolManager::new();
+        manager.start(test_request()).unwrap();
+        let projection = stop_within(&manager, Duration::from_secs(1));
+        assert_eq!(projection.status.connected_client_count, 0);
+        assert_eq!(
+            projection.status.source_health,
+            DevelopmentSourceHealth::Disconnected
+        );
+        assert!(projection.sources.is_empty());
+    }
+
+    #[test]
+    fn listener_shutdown_connected_client_revokes_source_and_joins_reader() {
+        let manager = DevelopmentProtocolManager::new();
+        manager.start(test_request()).unwrap();
+        let mut stream = connect_to_listener(&manager);
+        stream.write(hello());
+        assert!(stream.read_line().contains("host_hello_accepted"));
+        assert!(wait_until(Duration::from_secs(1), || manager
+            .projection()
+            .status
+            .connected_client_count
+            == 1));
+
+        let projection = stop_within(&manager, Duration::from_secs(1));
+        assert_eq!(projection.status.connected_client_count, 0);
+        assert!(!projection.status.stream_authorized);
+        assert_eq!(
+            projection.status.source_health,
+            DevelopmentSourceHealth::Disconnected
+        );
+        assert!(projection.sources.is_empty());
+        assert!(!manager.has_workers_for_test());
+    }
+
+    #[test]
+    fn listener_shutdown_authorized_stream_and_active_udp_stop_safely() {
+        let manager = DevelopmentProtocolManager::new();
+        let projection = manager.start(test_request()).unwrap();
+        let udp_port = projection.status.udp_port;
+        let _stream = connect_and_authorize(&manager);
+        let udp = UdpSocket::bind(("127.0.0.1", 0)).unwrap();
+        for sequence in 0..3 {
+            udp.send_to(
+                &build_test_packet(1, sequence, 1_000),
+                ("127.0.0.1", udp_port),
+            )
+            .unwrap();
+        }
+        assert!(wait_until(Duration::from_secs(1), || manager
+            .projection()
+            .diagnostics
+            .valid_packets
+            > 0));
+
+        let projection = stop_within(&manager, Duration::from_secs(1));
+        assert!(!projection.status.stream_authorized);
+        assert_eq!(projection.diagnostics.receiver_queue_depth, 0);
+        assert_eq!(
+            projection.diagnostics.current_source_health,
+            DevelopmentSourceHealth::Disconnected
+        );
+        assert!(!manager.has_workers_for_test());
+    }
+
+    #[test]
+    fn listener_shutdown_no_packets_are_accepted_after_stop() {
+        let manager = DevelopmentProtocolManager::new();
+        let projection = manager.start(test_request()).unwrap();
+        let udp_port = projection.status.udp_port;
+        let _stream = connect_and_authorize(&manager);
+        let udp = UdpSocket::bind(("127.0.0.1", 0)).unwrap();
+        udp.send_to(&build_test_packet(1, 0, 1_000), ("127.0.0.1", udp_port))
+            .unwrap();
+        assert!(wait_until(Duration::from_secs(1), || manager
+            .projection()
+            .diagnostics
+            .valid_packets
+            == 1));
+
+        stop_within(&manager, Duration::from_secs(1));
+        udp.send_to(&build_test_packet(1, 1, 1_000), ("127.0.0.1", udp_port))
+            .unwrap();
+        thread::sleep(Duration::from_millis(150));
+        assert_eq!(manager.projection().diagnostics.valid_packets, 1);
+    }
+
+    #[test]
+    fn listener_shutdown_during_heartbeat_wait_returns_promptly() {
+        let manager = DevelopmentProtocolManager::new();
+        manager.start(test_request()).unwrap();
+        let mut stream = connect_to_listener(&manager);
+        stream.write(hello());
+        assert!(stream.read_line().contains("host_hello_accepted"));
+
+        let projection = stop_within(&manager, Duration::from_secs(1));
+        assert_eq!(
+            projection.status.listener_state,
+            DevelopmentListenerState::Stopped
+        );
+        assert!(!manager.has_workers_for_test());
+    }
+
+    #[test]
+    fn listener_shutdown_stress_start_stop_twenty_five_times() {
+        let manager = DevelopmentProtocolManager::new();
+        for _ in 0..25 {
+            manager.start(test_request()).unwrap();
+            assert!(manager.has_workers_for_test());
+            stop_within(&manager, Duration::from_secs(1));
+            assert!(!manager.has_workers_for_test());
+            assert!(manager.projection().sources.is_empty());
+            assert!(!manager.projection().status.stream_authorized);
+        }
     }
 }

@@ -4,6 +4,7 @@ import {
   getDevelopmentStreamDiagnostics,
   startDevelopmentProtocolListener,
   stopDevelopmentProtocolListener,
+  type StartDevelopmentProtocolRequest,
 } from "./developmentProtocol";
 import type { DevelopmentProtocolStatus, DevelopmentStreamDiagnostics } from "./types";
 
@@ -86,10 +87,10 @@ export function useDevelopmentProtocol() {
     };
   }, [refresh]);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (request: StartDevelopmentProtocolRequest = {}) => {
     setPendingAction("start");
     try {
-      const projection = await startDevelopmentProtocolListener();
+      const projection = await startDevelopmentProtocolListener(request);
       if (!mountedRef.current) return;
       setStatus(projection.status);
       setDiagnostics(projection.diagnostics);
