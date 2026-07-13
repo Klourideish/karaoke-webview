@@ -249,6 +249,46 @@ const idleDevelopmentDiagnostics: DevelopmentStreamDiagnostics = {
   lastValidPacketAgeMs: null,
   level: { rms: 0, peak: 0, clipping: false, sequence: 0 },
 };
+const idleDiagnosticMonitorStatus = {
+  attemptId: null,
+  state: "idle" as const,
+  sourceId: null,
+  outputDeviceId: null,
+  gain: 0.25,
+  message: null,
+  failureReason: null,
+};
+
+const activeDiagnosticMonitorStatus = {
+  ...idleDiagnosticMonitorStatus,
+  attemptId: "diagnostic-monitor-1",
+  state: "active" as const,
+  sourceId: "windows-mic-primary",
+  outputDeviceId: "default",
+  message: "Diagnostic monitoring is active.",
+};
+
+const idleDiagnosticMonitorDiagnostics = {
+  queueCapacity: 8,
+  queueDepth: 0,
+  maximumQueueDepth: 0,
+  droppedMonitorFrames: 0,
+  underruns: 0,
+  resets: 0,
+  bufferedLatencyMs: 0,
+  inputSampleRateHz: null,
+  outputSampleRateHz: null,
+  inputChannels: null,
+  outputChannels: null,
+  gain: 0.25,
+  samplesConsumed: 0,
+  samplesWritten: 0,
+  syntheticSilenceSamples: 0,
+};
+
+const diagnosticOutputDevices = [
+  { id: "default", displayName: "Default Windows output", isDefault: true },
+];
 const idleCaptureSnapshot: DiagnosticCaptureSnapshot = {
   status: "idle",
   sessionId: null,
@@ -425,6 +465,40 @@ function mockInvokeWith({
         return Promise.resolve([]);
       }
 
+      if (command === "list_diagnostic_output_devices") {
+        return Promise.resolve(diagnosticOutputDevices);
+      }
+
+      if (command === "get_diagnostic_monitor_status") {
+        return Promise.resolve(monitorStatus);
+      }
+
+      if (command === "get_diagnostic_monitor_diagnostics") {
+        return Promise.resolve(monitorDiagnostics);
+      }
+
+      if (command === "start_diagnostic_monitor") {
+        monitorStatus = activeDiagnosticMonitorStatus;
+        monitorDiagnostics = {
+          ...idleDiagnosticMonitorDiagnostics,
+          queueDepth: 1,
+          maximumQueueDepth: 1,
+          inputSampleRateHz: 48000,
+          outputSampleRateHz: 48000,
+          inputChannels: 1,
+          outputChannels: 2,
+          samplesConsumed: 480,
+          samplesWritten: 480,
+        };
+        return Promise.resolve(monitorStatus);
+      }
+
+      if (command === "stop_diagnostic_monitor") {
+        monitorStatus = idleDiagnosticMonitorStatus;
+        monitorDiagnostics = idleDiagnosticMonitorDiagnostics;
+        return Promise.resolve(monitorStatus);
+      }
+
       if (command === "list_microphone_channels") {
         return Promise.resolve([]);
       }
@@ -515,6 +589,25 @@ function mockSuccessfulLibraryInvoke(command: string) {
     return Promise.resolve([]);
   }
 
+  if (command === "list_diagnostic_output_devices") {
+    return Promise.resolve(diagnosticOutputDevices);
+  }
+
+  if (command === "get_diagnostic_monitor_status") {
+    return Promise.resolve(idleDiagnosticMonitorStatus);
+  }
+
+  if (command === "get_diagnostic_monitor_diagnostics") {
+    return Promise.resolve(idleDiagnosticMonitorDiagnostics);
+  }
+
+  if (command === "start_diagnostic_monitor") {
+    return Promise.resolve(activeDiagnosticMonitorStatus);
+  }
+
+  if (command === "stop_diagnostic_monitor") {
+    return Promise.resolve(idleDiagnosticMonitorStatus);
+  }
   if (command === "list_microphone_channels") {
     return Promise.resolve([]);
   }
@@ -685,6 +778,8 @@ describe("Microphone workspace", () => {
     captureSnapshot?: DiagnosticCaptureSnapshot;
     developmentStatus?: DevelopmentProtocolStatus;
     developmentDiagnostics?: DevelopmentStreamDiagnostics;
+    monitorStatus?: typeof idleDiagnosticMonitorStatus;
+    monitorDiagnostics?: typeof idleDiagnosticMonitorDiagnostics;
   };
 
   function mockMicrophoneWorkspace(state: MicrophoneInvokeState = {}) {
@@ -696,11 +791,47 @@ describe("Microphone workspace", () => {
     let captureSnapshot = state.captureSnapshot ?? idleCaptureSnapshot;
     let developmentStatus = state.developmentStatus ?? stoppedDevelopmentStatus;
     let developmentDiagnostics = state.developmentDiagnostics ?? idleDevelopmentDiagnostics;
+    let monitorStatus = state.monitorStatus ?? idleDiagnosticMonitorStatus;
+    let monitorDiagnostics = state.monitorDiagnostics ?? idleDiagnosticMonitorDiagnostics;
     let nextChannelSequence = 2;
 
     tauriMocks.invoke.mockImplementation((command: string, args?: Record<string, unknown>) => {
       if (command === "discover_local_microphone_sources") {
         return Promise.resolve(sources);
+      }
+
+      if (command === "list_diagnostic_output_devices") {
+        return Promise.resolve(diagnosticOutputDevices);
+      }
+
+      if (command === "get_diagnostic_monitor_status") {
+        return Promise.resolve(monitorStatus);
+      }
+
+      if (command === "get_diagnostic_monitor_diagnostics") {
+        return Promise.resolve(monitorDiagnostics);
+      }
+
+      if (command === "start_diagnostic_monitor") {
+        monitorStatus = activeDiagnosticMonitorStatus;
+        monitorDiagnostics = {
+          ...idleDiagnosticMonitorDiagnostics,
+          queueDepth: 1,
+          maximumQueueDepth: 1,
+          inputSampleRateHz: 48000,
+          outputSampleRateHz: 48000,
+          inputChannels: 1,
+          outputChannels: 2,
+          samplesConsumed: 480,
+          samplesWritten: 480,
+        };
+        return Promise.resolve(monitorStatus);
+      }
+
+      if (command === "stop_diagnostic_monitor") {
+        monitorStatus = idleDiagnosticMonitorStatus;
+        monitorDiagnostics = idleDiagnosticMonitorDiagnostics;
+        return Promise.resolve(monitorStatus);
       }
 
       if (command === "list_microphone_channels") {
@@ -1222,6 +1353,60 @@ describe("Microphone workspace", () => {
           ([command]) => command === "start_development_protocol_listener",
         ),
       ).toHaveLength(1),
+    );
+  });
+  it("starts and stops diagnostic audio monitoring from Developer diagnostics", async () => {
+    mockMicrophoneWorkspace({
+      sources: [discoveredMicrophones[0]],
+      channels: [microphoneChannel],
+      assignments: [microphoneAssignment],
+      captureSnapshot: activeCaptureSnapshot(),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    await openDeveloperDiagnostics(user);
+
+    await user.selectOptions(screen.getByLabelText("Source"), "windows-mic-primary");
+    await user.clear(screen.getByLabelText("Gain"));
+    await user.type(screen.getByLabelText("Gain"), "35");
+    await user.click(screen.getByRole("button", { name: "Start Monitoring" }));
+
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("start_diagnostic_monitor", {
+        request: { sourceId: "windows-mic-primary", outputDeviceId: "default", gain: 0.35 },
+      }),
+    );
+    expect(await screen.findByText(/Status: Active/)).toBeInTheDocument();
+    expect(screen.getByText(/Queue: 1\/8/)).toBeInTheDocument();
+    expect(screen.getByText(/Samples written: 480/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Stop Monitoring" }));
+
+    await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("stop_diagnostic_monitor"));
+  });
+
+  it("rejects invalid diagnostic monitor gain before invoking the Host", async () => {
+    mockMicrophoneWorkspace({
+      sources: [discoveredMicrophones[0]],
+      captureSnapshot: activeCaptureSnapshot(),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    await openDeveloperDiagnostics(user);
+
+    await user.selectOptions(screen.getByLabelText("Source"), "windows-mic-primary");
+    await user.clear(screen.getByLabelText("Gain"));
+    await user.type(screen.getByLabelText("Gain"), "125");
+    await user.click(screen.getByRole("button", { name: "Start Monitoring" }));
+
+    expect(screen.getByText("Gain must be a number from 0 to 100.")).toBeInTheDocument();
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "start_diagnostic_monitor",
+      expect.anything(),
     );
   });
 });

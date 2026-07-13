@@ -11,6 +11,7 @@ use std::{
 use super::{
     backend::{CaptureBackend, CaptureEnd, PlatformCaptureBackend},
     models::{DiagnosticCaptureSnapshot, DiagnosticCaptureStatus, MicrophoneLevelSnapshot},
+    monitor::DiagnosticAudioMonitorManager,
 };
 
 const DIAGNOSTIC_CAPTURE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
@@ -37,6 +38,7 @@ pub(crate) struct DiagnosticCaptureManager {
     operations: Mutex<()>,
     inner: Arc<Mutex<ManagerInner>>,
     backend: Arc<dyn CaptureBackend>,
+    monitor: Option<Arc<DiagnosticAudioMonitorManager>>,
     next_session: AtomicU64,
     session_timeout: Duration,
 }
@@ -47,15 +49,18 @@ impl DiagnosticCaptureManager {
         Self::with_backend(
             Arc::new(PlatformCaptureBackend::new(None)),
             DIAGNOSTIC_CAPTURE_TIMEOUT,
+            None,
         )
     }
 
     pub(crate) fn with_development(
         development: Arc<crate::development_protocol::DevelopmentProtocolManager>,
+        monitor: Arc<DiagnosticAudioMonitorManager>,
     ) -> Self {
         Self::with_backend(
             Arc::new(PlatformCaptureBackend::new(Some(development))),
             DIAGNOSTIC_CAPTURE_TIMEOUT,
+            Some(monitor),
         )
     }
 
@@ -64,10 +69,14 @@ impl DiagnosticCaptureManager {
         backend: Arc<dyn CaptureBackend>,
         session_timeout: Duration,
     ) -> Self {
-        Self::with_backend(backend, session_timeout)
+        Self::with_backend(backend, session_timeout, None)
     }
 
-    fn with_backend(backend: Arc<dyn CaptureBackend>, session_timeout: Duration) -> Self {
+    fn with_backend(
+        backend: Arc<dyn CaptureBackend>,
+        session_timeout: Duration,
+        monitor: Option<Arc<DiagnosticAudioMonitorManager>>,
+    ) -> Self {
         Self {
             operations: Mutex::new(()),
             inner: Arc::new(Mutex::new(ManagerInner {
@@ -76,6 +85,7 @@ impl DiagnosticCaptureManager {
                 snapshot: DiagnosticCaptureSnapshot::idle(),
             })),
             backend,
+            monitor,
             next_session: AtomicU64::new(1),
             session_timeout,
         }
@@ -132,8 +142,11 @@ impl DiagnosticCaptureManager {
         let (ready_tx, ready_rx) = mpsc::channel();
         let backend = Arc::clone(&self.backend);
         let inner = Arc::clone(&self.inner);
+        let monitor_for_frames = self.monitor.as_ref().map(Arc::clone);
+        let monitor_for_cleanup = self.monitor.as_ref().map(Arc::clone);
         let worker_session_id = session_id.clone();
         let worker_source_id = source_id.clone();
+        let frame_source_id = source_id.clone();
         let timeout = self.session_timeout;
         let worker = std::thread::spawn(move || {
             let level_inner = Arc::clone(&inner);
@@ -153,8 +166,17 @@ impl DiagnosticCaptureManager {
                         state.snapshot.level = level;
                     }
                 }),
+                Box::new(move |frame| {
+                    if let Some(monitor) = &monitor_for_frames {
+                        monitor.consume_frame(&frame_source_id, frame);
+                    }
+                }),
                 timeout,
             );
+
+            if let Some(monitor) = &monitor_for_cleanup {
+                monitor.stop_for_source(&worker_source_id, "The microphone test stopped.");
+            }
 
             let mut state = lock_inner(&inner);
             if state.snapshot.session_id.as_deref() != Some(&worker_session_id) {
@@ -225,6 +247,10 @@ impl DiagnosticCaptureManager {
     fn stop_active_worker(&self) {
         let active = lock_inner(&self.inner).active.take();
         if let Some(active) = active {
+            let source_id = lock_inner(&self.inner).snapshot.source_id.clone();
+            if let (Some(monitor), Some(source_id)) = (&self.monitor, source_id) {
+                monitor.stop_for_source(&source_id, "The microphone test stopped.");
+            }
             let _ = active.stop.send(());
             if active.worker.thread().id() != std::thread::current().id() {
                 let _ = active.worker.join();

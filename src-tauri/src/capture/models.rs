@@ -1,5 +1,19 @@
 use serde::Serialize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MonitorSampleEncoding {
+    Float32,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CaptureAudioFrame {
+    pub samples: Vec<f32>,
+    pub sample_rate_hz: u32,
+    pub channels: u16,
+    pub sequence: u64,
+    pub encoding: MonitorSampleEncoding,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum DiagnosticCaptureStatus {

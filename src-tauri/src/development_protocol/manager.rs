@@ -10,7 +10,11 @@ use std::{
 };
 
 use crate::{
-    capture::{backend::CaptureEnd, levels::normalized_levels, MicrophoneLevelSnapshot},
+    capture::{
+        backend::{AudioFrameConsumer, CaptureEnd, LevelConsumer},
+        levels::normalized_levels,
+        CaptureAudioFrame, MicrophoneLevelSnapshot, MonitorSampleEncoding,
+    },
     microphones::{DiscoveredMicrophoneSource, MicrophoneSourceAvailability, MicrophoneSourceKind},
 };
 
@@ -244,7 +248,8 @@ impl DevelopmentProtocolManager {
         source_id: &str,
         stop: mpsc::Receiver<()>,
         ready: mpsc::Sender<Result<(), String>>,
-        levels: Box<dyn Fn(MicrophoneLevelSnapshot) + Send>,
+        levels: LevelConsumer,
+        audio_frames: AudioFrameConsumer,
         timeout: Duration,
     ) -> Result<CaptureEnd, String> {
         if !self.is_source_available(source_id) {
@@ -279,6 +284,13 @@ impl DevelopmentProtocolManager {
                     sequence += 1;
                     let level = normalized_levels(&normalized, sequence);
                     lock(&self.inner).level = level;
+                    audio_frames(CaptureAudioFrame {
+                        samples: normalized,
+                        sample_rate_hz: 48_000,
+                        channels: 1,
+                        sequence,
+                        encoding: MonitorSampleEncoding::Float32,
+                    });
                     levels(level);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -1065,6 +1077,7 @@ mod tests {
                 Box::new(move |level| {
                     let _ = level_tx.send(level);
                 }),
+                Box::new(|_frame| {}),
                 Duration::from_secs(2),
             )
         });

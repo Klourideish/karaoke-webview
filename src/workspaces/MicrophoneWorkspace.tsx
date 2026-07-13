@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Singer } from "../app/SingerBar";
 import type { KaraokeMode } from "../host-domain/types";
 import { useDiagnosticCapture } from "../microphones/useDiagnosticCapture";
+import { useDiagnosticMonitor } from "../microphones/useDiagnosticMonitor";
 import { useDevelopmentProtocol } from "../microphones/useDevelopmentProtocol";
 import type { useLocalMicrophones } from "../microphones/useLocalMicrophones";
 import type { useMicrophoneAssignments } from "../microphones/useMicrophoneAssignments";
@@ -62,10 +63,15 @@ export function MicrophoneWorkspace({
     start: startCapture,
     stop: stopCapture,
   } = useDiagnosticCapture();
+  const diagnosticMonitor = useDiagnosticMonitor();
   const [developmentBindAddress, setDevelopmentBindAddress] = useState("127.0.0.1");
   const [developmentTcpPort, setDevelopmentTcpPort] = useState("45820");
   const [developmentUdpPort, setDevelopmentUdpPort] = useState("45821");
   const [developmentFormError, setDevelopmentFormError] = useState<string | null>(null);
+  const [monitorSourceId, setMonitorSourceId] = useState("");
+  const [monitorOutputId, setMonitorOutputId] = useState("default");
+  const [monitorGain, setMonitorGain] = useState("25");
+  const [monitorFormError, setMonitorFormError] = useState<string | null>(null);
   const [readinessMode, setReadinessMode] = useState<KaraokeMode>("standard");
   const [allowAutomaticRecovery, setAllowAutomaticRecovery] = useState(true);
 
@@ -219,6 +225,27 @@ export function MicrophoneWorkspace({
     await discovery.refresh();
   }
 
+  async function startDiagnosticMonitoring() {
+    const gainPercent = Number(monitorGain);
+    if (!monitorSourceId) {
+      setMonitorFormError("Choose a microphone source before monitoring.");
+      return;
+    }
+    if (!monitorOutputId) {
+      setMonitorFormError("Choose an output device before monitoring.");
+      return;
+    }
+    if (!Number.isFinite(gainPercent) || gainPercent < 0 || gainPercent > 100) {
+      setMonitorFormError("Gain must be a number from 0 to 100.");
+      return;
+    }
+    setMonitorFormError(null);
+    await diagnosticMonitor.start({
+      sourceId: monitorSourceId,
+      outputDeviceId: monitorOutputId,
+      gain: gainPercent / 100,
+    });
+  }
   const isDevelopmentListenerActive = development.status.listenerState === "listening";
   const developmentControlsDisabled =
     development.pendingAction !== null || isDevelopmentListenerActive;
@@ -405,6 +432,7 @@ export function MicrophoneWorkspace({
           developmentFormError={developmentFormError}
           developmentTcpPort={developmentTcpPort}
           developmentUdpPort={developmentUdpPort}
+          diagnosticMonitor={diagnosticMonitor}
           isDevelopmentListenerActive={isDevelopmentListenerActive}
           readiness={readiness}
           readinessMode={readinessMode}
@@ -412,9 +440,17 @@ export function MicrophoneWorkspace({
           setDevelopmentBindAddress={setDevelopmentBindAddress}
           setDevelopmentTcpPort={setDevelopmentTcpPort}
           setDevelopmentUdpPort={setDevelopmentUdpPort}
+          setMonitorGain={setMonitorGain}
+          setMonitorOutputId={setMonitorOutputId}
+          setMonitorSourceId={setMonitorSourceId}
           setReadinessMode={setReadinessMode}
           startDevelopmentListener={startDevelopmentListener}
+          startDiagnosticMonitoring={startDiagnosticMonitoring}
           stopCapture={stopCapture}
+          monitorFormError={monitorFormError}
+          monitorGain={monitorGain}
+          monitorOutputId={monitorOutputId}
+          monitorSourceId={monitorSourceId}
           sources={discovery.sources}
         />
       </details>
@@ -611,15 +647,24 @@ function DeveloperDiagnostics({
   developmentFormError,
   developmentTcpPort,
   developmentUdpPort,
+  diagnosticMonitor,
   isDevelopmentListenerActive,
+  monitorFormError,
+  monitorGain,
+  monitorOutputId,
+  monitorSourceId,
   readiness,
   readinessMode,
   setAllowAutomaticRecovery,
   setDevelopmentBindAddress,
   setDevelopmentTcpPort,
   setDevelopmentUdpPort,
+  setMonitorGain,
+  setMonitorOutputId,
+  setMonitorSourceId,
   setReadinessMode,
   startDevelopmentListener,
+  startDiagnosticMonitoring,
   stopCapture,
   sources,
 }: {
@@ -633,15 +678,24 @@ function DeveloperDiagnostics({
   developmentFormError: string | null;
   developmentTcpPort: string;
   developmentUdpPort: string;
+  diagnosticMonitor: ReturnType<typeof useDiagnosticMonitor>;
   isDevelopmentListenerActive: boolean;
+  monitorFormError: string | null;
+  monitorGain: string;
+  monitorOutputId: string;
+  monitorSourceId: string;
   readiness: ReturnType<typeof usePerformanceMicrophoneReadiness>;
   readinessMode: KaraokeMode;
   setAllowAutomaticRecovery: (value: boolean) => void;
   setDevelopmentBindAddress: (value: string) => void;
   setDevelopmentTcpPort: (value: string) => void;
   setDevelopmentUdpPort: (value: string) => void;
+  setMonitorGain: (value: string) => void;
+  setMonitorOutputId: (value: string) => void;
+  setMonitorSourceId: (value: string) => void;
   setReadinessMode: (value: KaraokeMode) => void;
   startDevelopmentListener: () => Promise<void>;
+  startDiagnosticMonitoring: () => Promise<void>;
   stopCapture: () => Promise<void>;
   sources: LocalMicrophoneSource[];
 }) {
@@ -825,6 +879,119 @@ function DeveloperDiagnostics({
         </p>
       </section>
 
+      <section className="microphone-test-panel" aria-labelledby="diagnostic-monitor-heading">
+        <div>
+          <p className="region-label">Developer</p>
+          <h3 id="diagnostic-monitor-heading">Diagnostic audio monitoring</h3>
+        </div>
+        <p className="microphone-error" role="note">
+          Use headphones to prevent acoustic feedback.
+        </p>
+        <label>
+          Source
+          <select
+            className="microphone-select"
+            value={monitorSourceId}
+            disabled={
+              diagnosticMonitor.pendingAction !== null ||
+              diagnosticMonitor.status.state === "active"
+            }
+            onChange={(event) => setMonitorSourceId(event.target.value)}
+          >
+            <option value="">Choose microphone</option>
+            {sources
+              .filter((source) => source.availability === "available")
+              .map((source) => (
+                <option key={source.id} value={source.id}>
+                  {source.displayName}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          Output
+          <select
+            className="microphone-select"
+            value={monitorOutputId}
+            disabled={
+              diagnosticMonitor.pendingAction !== null ||
+              diagnosticMonitor.status.state === "active"
+            }
+            onChange={(event) => setMonitorOutputId(event.target.value)}
+          >
+            {diagnosticMonitor.outputs.length === 0 ? (
+              <option value="default">Default Windows output</option>
+            ) : null}
+            {diagnosticMonitor.outputs.map((output) => (
+              <option key={output.id} value={output.id}>
+                {output.displayName}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Gain
+          <input
+            className="microphone-select"
+            type="number"
+            min={0}
+            max={100}
+            value={monitorGain}
+            disabled={
+              diagnosticMonitor.pendingAction !== null ||
+              diagnosticMonitor.status.state === "active"
+            }
+            onChange={(event) => setMonitorGain(event.target.value)}
+          />
+        </label>
+        <div className="microphone-test-actions">
+          <button
+            className="microphone-test-button"
+            type="button"
+            disabled={
+              diagnosticMonitor.pendingAction !== null ||
+              diagnosticMonitor.status.state === "active"
+            }
+            onClick={() => void startDiagnosticMonitoring()}
+          >
+            Start Monitoring
+          </button>
+          <button
+            className="microphone-test-button"
+            type="button"
+            disabled={
+              diagnosticMonitor.pendingAction !== null ||
+              diagnosticMonitor.status.state !== "active"
+            }
+            onClick={() => void diagnosticMonitor.stop()}
+          >
+            Stop Monitoring
+          </button>
+        </div>
+        {monitorFormError || diagnosticMonitor.error ? (
+          <p className="microphone-error" role="alert">
+            {monitorFormError ?? diagnosticMonitor.error}
+          </p>
+        ) : null}
+        <div className="microphone-capture-status" aria-live="polite">
+          <p>
+            Status: {readableState(diagnosticMonitor.status.state)} · Source:{" "}
+            {diagnosticMonitor.status.sourceId ?? "None"} · Output:{" "}
+            {diagnosticMonitor.status.outputDeviceId ?? "None"}
+          </p>
+          <p>
+            Queue: {diagnosticMonitor.diagnostics.queueDepth}/
+            {diagnosticMonitor.diagnostics.queueCapacity} · Dropped:{" "}
+            {diagnosticMonitor.diagnostics.droppedMonitorFrames} · Underruns:{" "}
+            {diagnosticMonitor.diagnostics.underruns} · Buffered:{" "}
+            {diagnosticMonitor.diagnostics.bufferedLatencyMs} ms
+          </p>
+          <p>
+            Samples written: {diagnosticMonitor.diagnostics.samplesWritten} · Gain:{" "}
+            {Math.round(diagnosticMonitor.diagnostics.gain * 100)}%
+          </p>
+        </div>
+      </section>
       <section className="microphone-test-panel" aria-labelledby="runtime-inventory-heading">
         <div>
           <p className="region-label">Developer</p>

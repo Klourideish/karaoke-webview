@@ -17,7 +17,11 @@ use windows::{
 
 use crate::microphones::windows::{active_capture_device, ComApartment};
 
-use super::{backend::CaptureEnd, levels::normalized_levels, models::MicrophoneLevelSnapshot};
+use super::{
+    backend::{AudioFrameConsumer, CaptureEnd, LevelConsumer},
+    levels::normalized_levels,
+    models::{CaptureAudioFrame, MonitorSampleEncoding},
+};
 
 const BUFFER_DURATION_100NS: i64 = 1_000_000;
 const LEVEL_INTERVAL: Duration = Duration::from_millis(50);
@@ -32,7 +36,8 @@ pub(super) fn run_shared_capture(
     source_id: &str,
     stop: Receiver<()>,
     ready: Sender<Result<(), String>>,
-    levels: Box<dyn Fn(MicrophoneLevelSnapshot) + Send>,
+    levels: LevelConsumer,
+    audio_frames: AudioFrameConsumer,
     timeout: Duration,
 ) -> Result<CaptureEnd, String> {
     let prepared = prepare_capture(source_id);
@@ -69,7 +74,13 @@ pub(super) fn run_shared_capture(
             break Ok(CaptureEnd::TimedOut);
         }
 
-        if let Err(error) = drain_packets(&capture_client, format, &mut pending_samples) {
+        if let Err(error) = drain_packets(
+            &capture_client,
+            format,
+            &mut pending_samples,
+            &audio_frames,
+            &mut sequence,
+        ) {
             break Err(error);
         }
 
@@ -129,6 +140,8 @@ fn drain_packets(
     capture_client: &IAudioCaptureClient,
     format: AudioFormat,
     samples: &mut Vec<f32>,
+    audio_frames: &AudioFrameConsumer,
+    sequence: &mut u64,
 ) -> Result<(), String> {
     loop {
         // SAFETY: The capture service is valid while its owning audio client remains active.
@@ -145,6 +158,7 @@ fn drain_packets(
         unsafe { capture_client.GetBuffer(&mut data, &mut frames, &mut flags, None, None) }
             .map_err(|error| capture_error("Could not read microphone samples.", error))?;
 
+        let before = samples.len();
         let decoded = if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 {
             let sample_count = frames as usize * format.channels as usize;
             samples.resize(samples.len() + sample_count, 0.0);
@@ -156,6 +170,17 @@ fn drain_packets(
         let released = unsafe { capture_client.ReleaseBuffer(frames) }
             .map_err(|error| capture_error("Could not release microphone samples.", error));
         decoded?;
+        let new_samples = samples[before..].to_vec();
+        if !new_samples.is_empty() {
+            *sequence = sequence.wrapping_add(1);
+            audio_frames(CaptureAudioFrame {
+                samples: new_samples,
+                sample_rate_hz: format.sample_rate_hz,
+                channels: format.channels,
+                sequence: *sequence,
+                encoding: MonitorSampleEncoding::Float32,
+            });
+        }
         released?;
     }
 }
@@ -208,6 +233,7 @@ fn decode_samples(
 #[derive(Debug, Clone, Copy)]
 struct AudioFormat {
     channels: u16,
+    sample_rate_hz: u32,
     block_align: u16,
     bits_per_sample: u16,
     encoding: SampleEncoding,
@@ -242,6 +268,7 @@ impl AudioFormat {
 
         let format = Self {
             channels: basic.nChannels,
+            sample_rate_hz: basic.nSamplesPerSec,
             block_align: basic.nBlockAlign,
             bits_per_sample: basic.wBitsPerSample,
             encoding,
@@ -258,6 +285,7 @@ impl AudioFormat {
         let bytes_per_sample = self.bits_per_sample.checked_div(8).unwrap_or(0);
         let expected_block_align = self.channels.checked_mul(bytes_per_sample);
         if self.channels == 0
+            || self.sample_rate_hz == 0
             || self.bits_per_sample % 8 != 0
             || !supported_bits
             || expected_block_align != Some(self.block_align)
@@ -306,6 +334,7 @@ mod tests {
     fn rejects_inconsistent_native_sample_layouts() {
         let format = AudioFormat {
             channels: 2,
+            sample_rate_hz: 48_000,
             block_align: 4,
             bits_per_sample: 24,
             encoding: SampleEncoding::Pcm,
@@ -322,6 +351,7 @@ mod tests {
         let bytes = [0x00, 0x40, 0x00, 0xc0];
         let format = AudioFormat {
             channels: 2,
+            sample_rate_hz: 48_000,
             block_align: 4,
             bits_per_sample: 16,
             encoding: SampleEncoding::Pcm,

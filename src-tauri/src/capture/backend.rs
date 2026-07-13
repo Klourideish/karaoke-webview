@@ -1,9 +1,12 @@
-use std::{
+﻿use std::{
     sync::mpsc::{Receiver, Sender},
     time::Duration,
 };
 
-use super::models::MicrophoneLevelSnapshot;
+use super::models::{CaptureAudioFrame, MicrophoneLevelSnapshot};
+
+pub(crate) type LevelConsumer = Box<dyn Fn(MicrophoneLevelSnapshot) + Send>;
+pub(crate) type AudioFrameConsumer = Box<dyn Fn(CaptureAudioFrame) + Send>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CaptureEnd {
@@ -17,7 +20,8 @@ pub(crate) trait CaptureBackend: Send + Sync {
         source_id: &str,
         stop: Receiver<()>,
         ready: Sender<Result<(), String>>,
-        levels: Box<dyn Fn(MicrophoneLevelSnapshot) + Send>,
+        levels: LevelConsumer,
+        audio_frames: AudioFrameConsumer,
         timeout: Duration,
     ) -> Result<CaptureEnd, String>;
 }
@@ -42,15 +46,23 @@ impl CaptureBackend for PlatformCaptureBackend {
         source_id: &str,
         stop: Receiver<()>,
         ready: Sender<Result<(), String>>,
-        levels: Box<dyn Fn(MicrophoneLevelSnapshot) + Send>,
+        levels: LevelConsumer,
+        audio_frames: AudioFrameConsumer,
         timeout: Duration,
     ) -> Result<CaptureEnd, String> {
         if source_id.starts_with("network-mic-") {
             if let Some(development) = &self.development {
-                return development.run_capture(source_id, stop, ready, levels, timeout);
+                return development.run_capture(
+                    source_id,
+                    stop,
+                    ready,
+                    levels,
+                    audio_frames,
+                    timeout,
+                );
             }
         }
-        platform_capture(source_id, stop, ready, levels, timeout)
+        platform_capture(source_id, stop, ready, levels, audio_frames, timeout)
     }
 }
 
@@ -59,10 +71,11 @@ fn platform_capture(
     source_id: &str,
     stop: Receiver<()>,
     ready: Sender<Result<(), String>>,
-    levels: Box<dyn Fn(MicrophoneLevelSnapshot) + Send>,
+    levels: LevelConsumer,
+    audio_frames: AudioFrameConsumer,
     timeout: Duration,
 ) -> Result<CaptureEnd, String> {
-    super::windows::run_shared_capture(source_id, stop, ready, levels, timeout)
+    super::windows::run_shared_capture(source_id, stop, ready, levels, audio_frames, timeout)
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -70,7 +83,8 @@ fn platform_capture(
     _source_id: &str,
     _stop: Receiver<()>,
     ready: Sender<Result<(), String>>,
-    _levels: Box<dyn Fn(MicrophoneLevelSnapshot) + Send>,
+    _levels: LevelConsumer,
+    _audio_frames: AudioFrameConsumer,
     _timeout: Duration,
 ) -> Result<CaptureEnd, String> {
     let message = "Diagnostic microphone capture is available only on Windows.".to_string();

@@ -7,10 +7,10 @@ use std::{
 };
 
 use super::{
-    backend::{CaptureBackend, CaptureEnd},
+    backend::{AudioFrameConsumer, CaptureBackend, CaptureEnd, LevelConsumer},
     levels::normalized_levels,
     manager::DiagnosticCaptureManager,
-    models::{DiagnosticCaptureStatus, MicrophoneLevelSnapshot},
+    models::DiagnosticCaptureStatus,
 };
 
 #[derive(Clone, Copy)]
@@ -36,7 +36,8 @@ impl CaptureBackend for CountingBackend {
         _source_id: &str,
         stop: mpsc::Receiver<()>,
         ready: mpsc::Sender<Result<(), String>>,
-        _levels: Box<dyn Fn(MicrophoneLevelSnapshot) + Send>,
+        _levels: LevelConsumer,
+        _audio_frames: AudioFrameConsumer,
         _timeout: Duration,
     ) -> Result<CaptureEnd, String> {
         let active = self.active_workers.fetch_add(1, Ordering::SeqCst) + 1;
@@ -54,7 +55,8 @@ impl CaptureBackend for FakeBackend {
         _source_id: &str,
         stop: mpsc::Receiver<()>,
         ready: mpsc::Sender<Result<(), String>>,
-        levels: Box<dyn Fn(MicrophoneLevelSnapshot) + Send>,
+        levels: LevelConsumer,
+        _audio_frames: AudioFrameConsumer,
         timeout: Duration,
     ) -> Result<CaptureEnd, String> {
         match self.behavior {
