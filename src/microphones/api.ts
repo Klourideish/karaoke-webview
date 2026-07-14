@@ -36,10 +36,6 @@ export function replaceMicrophoneChannelSource(
   });
 }
 
-export function syncSessionSingers(singerIds: string[]): Promise<MicrophoneAssignment[]> {
-  return invoke<MicrophoneAssignment[]>("sync_session_singers", { singerIds });
-}
-
 export function listMicrophoneAssignments(): Promise<MicrophoneAssignment[]> {
   return invoke<MicrophoneAssignment[]>("list_microphone_assignments");
 }

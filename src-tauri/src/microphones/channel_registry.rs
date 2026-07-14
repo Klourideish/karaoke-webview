@@ -75,6 +75,27 @@ impl MicrophoneChannelRegistry {
         Ok(())
     }
 
+    pub(crate) fn remove_if_matches(&self, channel_id: &str, source_id: &str) -> bool {
+        let mut inner = lock(&self.inner);
+        let Some(index) = inner
+            .channels
+            .iter()
+            .position(|channel| channel.id == channel_id && channel.source_id == source_id)
+        else {
+            return false;
+        };
+        inner.channels.remove(index);
+        true
+    }
+
+    pub(crate) fn channel_for_source(&self, source_id: &str) -> Option<MicrophoneChannel> {
+        lock(&self.inner)
+            .channels
+            .iter()
+            .find(|channel| channel.source_id == source_id)
+            .cloned()
+    }
+
     pub(crate) fn replace_source(
         &self,
         channel_id: &str,

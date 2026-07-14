@@ -14,6 +14,8 @@ pub(crate) mod windows;
 
 pub(crate) use assignment_registry::MicrophoneAssignmentRegistry;
 pub(crate) use channel_registry::MicrophoneChannelRegistry;
+#[cfg(test)]
+pub(crate) use models::MicrophoneChannelState;
 use models::{
     AutomaticAssignmentResult, MicrophoneAssignment, MicrophoneChannel, MicrophoneRecoveryState,
     MicrophoneWaitingState, PerformanceMicrophoneReadiness, PerformanceMicrophoneReadinessRequest,
@@ -28,7 +30,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 pub(crate) struct MicrophoneRegistryOperations(Mutex<()>);
 
 impl MicrophoneRegistryOperations {
-    fn lock(&self) -> MutexGuard<'_, ()> {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, ()> {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -56,7 +58,7 @@ pub(crate) fn is_microphone_source_available(
     Ok(development.is_some_and(|manager| manager.is_source_available(source_id)))
 }
 
-fn discover_all_sources(
+pub(crate) fn discover_all_sources(
     development: Option<&Arc<crate::development_protocol::DevelopmentProtocolManager>>,
 ) -> Result<Vec<DiscoveredMicrophoneSource>, String> {
     let mut sources = discovery::discover_local_sources().map_err(|error| error.to_string())?;
@@ -143,16 +145,6 @@ pub(crate) fn replace_microphone_channel_source(
 }
 
 #[tauri::command]
-pub(crate) fn sync_session_singers(
-    singer_ids: Vec<String>,
-    assignments: tauri::State<'_, MicrophoneAssignmentRegistry>,
-    operations: tauri::State<'_, MicrophoneRegistryOperations>,
-) -> Vec<MicrophoneAssignment> {
-    let _operation = operations.lock();
-    assignments.sync_session_singers(singer_ids)
-}
-
-#[tauri::command]
 pub(crate) fn list_microphone_assignments(
     assignments: tauri::State<'_, MicrophoneAssignmentRegistry>,
 ) -> Vec<MicrophoneAssignment> {
@@ -165,9 +157,13 @@ pub(crate) fn assign_microphone_channel(
     singer_id: String,
     channels: tauri::State<'_, MicrophoneChannelRegistry>,
     assignments: tauri::State<'_, MicrophoneAssignmentRegistry>,
+    singers: tauri::State<'_, crate::session_singers::SessionSingerRegistry>,
     operations: tauri::State<'_, MicrophoneRegistryOperations>,
 ) -> Result<MicrophoneAssignment, String> {
     let _operation = operations.lock();
+    if !singers.contains(&singer_id) {
+        return Err("The selected session singer no longer exists.".to_string());
+    }
     let assignment = assign_persistent_channel(&channels, &assignments, &channel_id, &singer_id)?;
     let channel = channels.get(&channel_id).ok_or_else(|| {
         "The selected persistent microphone channel no longer exists.".to_string()
@@ -225,10 +221,14 @@ pub(crate) fn auto_assign_microphone_channel(
     singer_id: String,
     channels: tauri::State<'_, MicrophoneChannelRegistry>,
     assignments: tauri::State<'_, MicrophoneAssignmentRegistry>,
+    singers: tauri::State<'_, crate::session_singers::SessionSingerRegistry>,
     operations: tauri::State<'_, MicrophoneRegistryOperations>,
     development: tauri::State<'_, Arc<crate::development_protocol::DevelopmentProtocolManager>>,
 ) -> Result<AutomaticAssignmentResult, String> {
     let _operation = operations.lock();
+    if !singers.contains(&singer_id) {
+        return Err("The selected session singer no longer exists.".to_string());
+    }
     let sources = discover_all_sources(Some(&development))?;
     channels.reconcile(&sources);
     automatic_assignment::auto_assign(&singer_id, &sources, &channels, &assignments)
@@ -245,10 +245,11 @@ pub(crate) fn list_microphone_waiting_states(
 pub(crate) fn clear_microphone_waiting_state(
     singer_id: String,
     assignments: tauri::State<'_, MicrophoneAssignmentRegistry>,
+    singers: tauri::State<'_, crate::session_singers::SessionSingerRegistry>,
     operations: tauri::State<'_, MicrophoneRegistryOperations>,
 ) -> Result<(), String> {
     let _operation = operations.lock();
-    if !assignments.has_session_singer(&singer_id) {
+    if !singers.contains(&singer_id) {
         return Err("The selected session singer no longer exists.".to_string());
     }
     assignments.clear_waiting(&singer_id)

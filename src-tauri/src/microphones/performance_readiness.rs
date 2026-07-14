@@ -392,7 +392,6 @@ mod tests {
         let channels = MicrophoneChannelRegistry::default();
         let assignments = MicrophoneAssignmentRegistry::default();
         let recovery = MicrophoneRecoveryRegistry::default();
-        assignments.sync_session_singers(vec!["singer-1".to_string(), "singer-2".to_string()]);
         let sources = vec![
             source("windows-mic-a", MicrophoneSourceAvailability::Available),
             source("windows-mic-b", MicrophoneSourceAvailability::Available),

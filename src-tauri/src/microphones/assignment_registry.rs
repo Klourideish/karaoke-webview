@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Mutex,
-};
+use std::{collections::HashMap, sync::Mutex};
 
 use super::models::{
     MicrophoneAssignment, MicrophoneAssignmentMethod, MicrophoneWaitingReason,
@@ -12,7 +9,6 @@ use super::models::{
 struct AssignmentInner {
     assignments: Vec<MicrophoneAssignment>,
     preferred_source_by_singer: HashMap<String, String>,
-    session_singer_ids: HashSet<String>,
     waiting_states: Vec<MicrophoneWaitingState>,
     next_sequence: u64,
 }
@@ -23,35 +19,12 @@ pub(crate) struct MicrophoneAssignmentRegistry {
 }
 
 impl MicrophoneAssignmentRegistry {
-    pub(crate) fn sync_session_singers(
-        &self,
-        singer_ids: Vec<String>,
-    ) -> Vec<MicrophoneAssignment> {
-        let mut inner = lock(&self.inner);
-        inner.session_singer_ids = singer_ids.into_iter().collect();
-        let known_singers = inner.session_singer_ids.clone();
-        inner
-            .assignments
-            .retain(|assignment| known_singers.contains(&assignment.singer_id));
-        inner
-            .preferred_source_by_singer
-            .retain(|singer_id, _| known_singers.contains(singer_id));
-        inner
-            .waiting_states
-            .retain(|waiting| known_singers.contains(&waiting.singer_id));
-        inner.assignments.clone()
-    }
-
     pub(crate) fn list(&self) -> Vec<MicrophoneAssignment> {
         lock(&self.inner).assignments.clone()
     }
 
     pub(crate) fn list_waiting(&self) -> Vec<MicrophoneWaitingState> {
         lock(&self.inner).waiting_states.clone()
-    }
-
-    pub(crate) fn has_session_singer(&self, singer_id: &str) -> bool {
-        lock(&self.inner).session_singer_ids.contains(singer_id)
     }
 
     pub(crate) fn assignment_for_singer(&self, singer_id: &str) -> Option<MicrophoneAssignment> {
@@ -66,6 +39,14 @@ impl MicrophoneAssignmentRegistry {
         lock(&self.inner)
             .preferred_source_by_singer
             .get(singer_id)
+            .cloned()
+    }
+
+    pub(crate) fn waiting_for_singer(&self, singer_id: &str) -> Option<MicrophoneWaitingState> {
+        lock(&self.inner)
+            .waiting_states
+            .iter()
+            .find(|waiting| waiting.singer_id == singer_id)
             .cloned()
     }
 
@@ -92,9 +73,6 @@ impl MicrophoneAssignmentRegistry {
         method: MicrophoneAssignmentMethod,
     ) -> Result<MicrophoneAssignment, String> {
         let mut inner = lock(&self.inner);
-        if !inner.session_singer_ids.contains(singer_id) {
-            return Err("The selected session singer no longer exists.".to_string());
-        }
         if let Some(existing) = inner.assignments.iter().find(|assignment| {
             assignment.channel_id == channel_id && assignment.singer_id == singer_id
         }) {
@@ -147,6 +125,24 @@ impl MicrophoneAssignmentRegistry {
         Ok(())
     }
 
+    pub(crate) fn unassign_if_matches(
+        &self,
+        channel_id: &str,
+        singer_id: &str,
+        sequence: u64,
+    ) -> bool {
+        let mut inner = lock(&self.inner);
+        let Some(index) = inner.assignments.iter().position(|assignment| {
+            assignment.channel_id == channel_id
+                && assignment.singer_id == singer_id
+                && assignment.sequence == sequence
+        }) else {
+            return false;
+        };
+        inner.assignments.remove(index);
+        true
+    }
+
     pub(crate) fn is_channel_assigned(&self, channel_id: &str) -> bool {
         lock(&self.inner)
             .assignments
@@ -195,6 +191,22 @@ impl MicrophoneAssignmentRegistry {
         }
         Ok(())
     }
+
+    pub(crate) fn clear_unassigned_singer_metadata(&self, singer_id: &str) -> bool {
+        let mut inner = lock(&self.inner);
+        if inner
+            .assignments
+            .iter()
+            .any(|assignment| assignment.singer_id == singer_id)
+        {
+            return false;
+        }
+        inner.preferred_source_by_singer.remove(singer_id);
+        inner
+            .waiting_states
+            .retain(|waiting| waiting.singer_id != singer_id);
+        true
+    }
 }
 
 fn lock(inner: &Mutex<AssignmentInner>) -> std::sync::MutexGuard<'_, AssignmentInner> {
@@ -208,9 +220,7 @@ mod tests {
     use super::*;
 
     fn registry() -> MicrophoneAssignmentRegistry {
-        let registry = MicrophoneAssignmentRegistry::default();
-        registry.sync_session_singers(vec!["singer-1".to_string(), "singer-2".to_string()]);
-        registry
+        MicrophoneAssignmentRegistry::default()
     }
 
     #[test]
@@ -259,28 +269,11 @@ mod tests {
     }
 
     #[test]
-    fn unknown_singer_and_unassigned_channel_are_rejected() {
+    fn unassigned_channel_is_rejected() {
         let registry = registry();
-
-        assert_eq!(
-            registry
-                .assign("microphone-channel-1", "missing-singer")
-                .unwrap_err(),
-            "The selected session singer no longer exists."
-        );
         assert_eq!(
             registry.unassign("microphone-channel-1").unwrap_err(),
             "The microphone channel is not assigned."
         );
-    }
-
-    #[test]
-    fn removing_a_session_singer_clears_only_the_stale_assignment() {
-        let registry = registry();
-        registry.assign("microphone-channel-1", "singer-1").unwrap();
-
-        registry.sync_session_singers(vec!["singer-2".to_string()]);
-
-        assert!(registry.list().is_empty());
     }
 }

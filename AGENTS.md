@@ -20,7 +20,8 @@
 - Keep Rust media responsibilities focused: scanner, persistence, playback access, and future lyrics belong in separate modules.
 - Do not add TTML parsing to the media-library scanner module.
 - Preserve the desktop shell regions: top information bar, singer bar, left navigation, active central workspace, persistent right queue, and persistent bottom transport.
-- Singer IDs are local stable identifiers; singer display names are editable metadata.
+- SessionSinger identity and membership are Host-owned; React requests singer changes and renders immutable projections.
+- Singer IDs are session-local stable identifiers; singer display names are editable metadata.
 - Future voting and queue entries should reference singer IDs rather than display names.
 - Queue behavior and voting semantics are not implemented yet.
 - Use one continuously mounted real audio element when playback is introduced.
@@ -54,6 +55,7 @@
 - Preserve unrelated behaviour.
 - Add focused tests for changed behaviour.
 - Run `.\scripts\validate.ps1`.
+- Every new user-facing or architectural capability must include a clear manual verification path through normal UI, Developer diagnostics, or a documented test harness.
 - Report validation honestly.
 - Do not commit unless explicitly instructed.
 

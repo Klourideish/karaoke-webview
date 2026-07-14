@@ -4,26 +4,11 @@ import {
   assignMicrophoneChannel,
   autoAssignMicrophoneChannel,
   clearMicrophoneWaitingState,
+  listMicrophoneAssignments,
   listMicrophoneWaitingStates,
-  syncSessionSingers,
   unassignMicrophoneChannel,
 } from "./api";
 import type { MicrophoneAssignment, MicrophoneWaitingState } from "./types";
-
-let pendingSingerSync: { key: string; promise: Promise<MicrophoneAssignment[]> } | null = null;
-
-function synchronizeSingers(singerIds: string[]) {
-  const key = singerIds.join("\u0000");
-  if (!pendingSingerSync || pendingSingerSync.key !== key) {
-    const promise = syncSessionSingers(singerIds).finally(() => {
-      if (pendingSingerSync?.promise === promise) {
-        pendingSingerSync = null;
-      }
-    });
-    pendingSingerSync = { key, promise };
-  }
-  return pendingSingerSync.promise;
-}
 
 export function useMicrophoneAssignments(singers: readonly Singer[]) {
   const [assignments, setAssignments] = useState<MicrophoneAssignment[]>([]);
@@ -37,9 +22,8 @@ export function useMicrophoneAssignments(singers: readonly Singer[]) {
 
   useEffect(() => {
     const requestVersion = ++requestVersionRef.current;
-    const singerIds = singerKey ? singerKey.split("\u0000") : [];
     setIsLoading(true);
-    void synchronizeSingers(singerIds)
+    void listMicrophoneAssignments()
       .then(async (nextAssignments) => ({
         assignments: nextAssignments,
         waitingStates: await listMicrophoneWaitingStates(),
@@ -52,7 +36,7 @@ export function useMicrophoneAssignments(singers: readonly Singer[]) {
         }
       })
       .catch((cause: unknown) => {
-        console.error("Session singer identities could not be synchronized.", cause);
+        console.error("Microphone assignments could not be loaded.", cause);
         if (requestVersionRef.current === requestVersion) {
           setError("Could not load microphone assignments.");
         }

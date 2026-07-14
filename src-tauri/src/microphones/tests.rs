@@ -94,7 +94,6 @@ fn backend_discovery_failure_is_returned_without_sources() {
 fn assignment_survives_disconnect_recovery_and_source_replacement() {
     let channels = MicrophoneChannelRegistry::default();
     let assignments = MicrophoneAssignmentRegistry::default();
-    assignments.sync_session_singers(vec!["singer-1".to_string()]);
     let sources = [
         discovered_source("windows-mic-a", MicrophoneSourceAvailability::Available),
         discovered_source("windows-mic-b", MicrophoneSourceAvailability::Available),
@@ -117,7 +116,6 @@ fn assignment_survives_disconnect_recovery_and_source_replacement() {
 fn invalid_and_diagnostic_channels_cannot_be_assigned() {
     let channels = MicrophoneChannelRegistry::default();
     let assignments = MicrophoneAssignmentRegistry::default();
-    assignments.sync_session_singers(vec!["singer-1".to_string()]);
 
     for channel_id in ["missing-channel", "diagnostic-channel-windows-mic-a"] {
         assert_eq!(
@@ -131,7 +129,6 @@ fn invalid_and_diagnostic_channels_cannot_be_assigned() {
 fn assigned_channel_must_be_unassigned_before_removal() {
     let channels = MicrophoneChannelRegistry::default();
     let assignments = MicrophoneAssignmentRegistry::default();
-    assignments.sync_session_singers(vec!["singer-1".to_string()]);
     let sources = [discovered_source(
         "windows-mic-a",
         MicrophoneSourceAvailability::Available,

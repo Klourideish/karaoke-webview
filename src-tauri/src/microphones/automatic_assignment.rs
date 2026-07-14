@@ -16,10 +16,6 @@ pub(crate) fn auto_assign(
     channels: &MicrophoneChannelRegistry,
     assignments: &MicrophoneAssignmentRegistry,
 ) -> Result<AutomaticAssignmentResult, String> {
-    if !assignments.has_session_singer(singer_id) {
-        return Err("The selected session singer no longer exists.".to_string());
-    }
-
     if let Some(existing) = assignments.assignment_for_singer(singer_id) {
         return Ok(assigned(existing));
     }
@@ -138,7 +134,6 @@ mod tests {
     fn registries() -> (MicrophoneChannelRegistry, MicrophoneAssignmentRegistry) {
         let channels = MicrophoneChannelRegistry::default();
         let assignments = MicrophoneAssignmentRegistry::default();
-        assignments.sync_session_singers(vec!["singer-1".to_string(), "singer-2".to_string()]);
         (channels, assignments)
     }
 

@@ -3,6 +3,8 @@ mod development_protocol;
 mod lyrics;
 mod media_library;
 mod microphones;
+mod participant_commit;
+mod session_singers;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -21,6 +23,8 @@ pub fn run() {
         .manage(microphones::MicrophoneChannelRegistry::default())
         .manage(microphones::MicrophoneRecoveryRegistry::default())
         .manage(microphones::MicrophoneRegistryOperations::default())
+        .manage(session_singers::SessionSingerRegistry::with_initial_singers(4))
+        .manage(participant_commit::ParticipantCommitCoordinator::default())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             capture::diagnostic_capture_snapshot,
@@ -31,11 +35,15 @@ pub fn run() {
             capture::start_diagnostic_monitor,
             capture::stop_diagnostic_capture,
             capture::stop_diagnostic_monitor,
+            participant_commit::assign_microphone_to_existing_singer,
+            participant_commit::get_participant_commit_diagnostics,
             development_protocol::get_development_protocol_status,
             development_protocol::get_development_stream_diagnostics,
             microphones::assign_microphone_channel,
             microphones::auto_assign_microphone_channel,
             microphones::clear_microphone_waiting_state,
+            session_singers::create_session_singer,
+            participant_commit::create_session_singer_with_microphone,
             media_library::clear_library_index,
             media_library::load_library_index,
             media_library::load_library_settings,
@@ -44,6 +52,7 @@ pub fn run() {
             microphones::evaluate_performance_microphone_readiness,
             microphones::get_microphone_recovery_states,
             microphones::leave_microphone_channel_assigned,
+            session_singers::list_session_singers,
             development_protocol::list_development_network_sources,
             microphones::list_microphone_channels,
             microphones::list_microphone_assignments,
@@ -51,15 +60,16 @@ pub fn run() {
             lyrics::parse_song_lyrics,
             media_library::resolve_audio_source,
             microphones::remove_microphone_channel,
+            session_singers::remove_session_singer,
             microphones::replace_microphone_channel_source,
             microphones::replace_disconnected_microphone_channel_source,
             microphones::retry_microphone_channel_source,
+            session_singers::rename_session_singer,
             media_library::save_library_index,
             media_library::save_library_root,
             media_library::scan_media_library,
             development_protocol::start_development_protocol_listener,
             development_protocol::stop_development_protocol_listener,
-            microphones::sync_session_singers,
             microphones::unassign_microphone_channel
         ])
         .run(tauri::generate_context!())
