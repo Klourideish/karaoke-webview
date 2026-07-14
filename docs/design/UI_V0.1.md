@@ -132,6 +132,8 @@ Do not overload the performance area with queue or singer statistics.
 
 Keep the Host singer view restrained.
 
+Session singer identity and membership are Host-owned. The interface requests add, rename, and remove operations and reflects the returned Host projection.
+
 Show only information needed for session operation, such as:
 
 - name;
@@ -146,9 +148,20 @@ Some participant information, such as "3 songs queued," may be better projected 
 The persistent singer bar may show compact microphone readiness dots for quick operator awareness.
 Dots should remain restrained, accessible, and derived from Host microphone projections.
 
-Participant setup may later use a Sync flow. In development, QR pairing lets Android propose a local
-participant profile while the Host validates and commits any singer or microphone changes. Physical
-microphone setup remains a Host operator flow where selection is confirmed before mutation.
+The singer bar provides one restrained Sync action. Its first implemented path guides the operator
+through physical microphone selection, singer naming, and confirmation. Selection and navigation do
+not mutate Host state; final confirmation invokes one atomic Host participant commit. Phone pairing
+is visible as the next planned path but remains disabled until P5-002.
+
+The Sync flow is intentionally compact:
+
+1. choose physical microphone setup;
+2. choose an eligible local microphone;
+3. enter the singer name;
+4. confirm singer and microphone together.
+
+Developer contains a read-only participant onboarding verification panel so manual testing can
+confirm the atomic result or safe failure without exposing registry internals in normal UI.
 
 ## Microphones
 

@@ -9,6 +9,8 @@ Phone interaction is a core product direction, not an optional add-on. Sequence 
 - TTML parser and normalized lyric model
 - lyric timing and synchronized fragment presentation
 - classic fragment fill
+- Host-owned session singer registry and atomic participant commit foundation
+- Host Sync dialog and physical microphone onboarding through the atomic participant commit
 
 ## Immediate
 
@@ -18,7 +20,7 @@ Phone interaction is a core product direction, not an optional add-on. Sequence 
 
 ## Core Next
 
-- host-domain foundation
+- extend participant onboarding with development phone pairing
 - local microphone discovery
 - microphone channel model
 - local microphone capture and control

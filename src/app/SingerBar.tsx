@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
 import type { SessionSingerId } from "../host-domain/types";
 import type { SingerReadinessProjection } from "./singerReadiness";
 
@@ -10,15 +10,19 @@ export type Singer = {
 export function SingerBar({
   readiness,
   singers,
-  onAddSinger,
+  onOpenSync,
   onRemoveSinger,
   onRenameSinger,
+  error,
+  pendingMutation,
 }: {
   readiness: SingerReadinessProjection[];
   singers: Singer[];
-  onAddSinger: () => void;
-  onRemoveSinger: (id: string) => void;
-  onRenameSinger: (id: string, displayName: string) => void;
+  onOpenSync: () => void;
+  onRemoveSinger: (id: string) => Promise<boolean>;
+  onRenameSinger: (id: string, displayName: string) => Promise<unknown>;
+  error: string | null;
+  pendingMutation: string | null;
 }) {
   const readinessBySinger = new Map(readiness.map((item) => [item.singerId, item]));
 
@@ -36,13 +40,26 @@ export function SingerBar({
             singer={singer}
             onRemoveSinger={onRemoveSinger}
             onRenameSinger={onRenameSinger}
+            pending={pendingMutation === singer.id}
           />
         ))}
       </div>
 
-      <button className="add-singer-button" type="button" onClick={onAddSinger}>
-        Add singer
-      </button>
+      <div className="singer-bar-actions">
+        {error ? (
+          <p className="singer-bar-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <button
+          className="add-singer-button sync-singer-button"
+          type="button"
+          disabled={pendingMutation !== null}
+          onClick={onOpenSync}
+        >
+          + Sync
+        </button>
+      </div>
     </section>
   );
 }
@@ -52,15 +69,28 @@ function SingerItem({
   singer,
   onRemoveSinger,
   onRenameSinger,
+  pending,
 }: {
   readiness?: SingerReadinessProjection;
   singer: Singer;
-  onRemoveSinger: (id: string) => void;
-  onRenameSinger: (id: string, displayName: string) => void;
+  onRemoveSinger: (id: string) => Promise<boolean>;
+  onRenameSinger: (id: string, displayName: string) => Promise<unknown>;
+  pending: boolean;
 }) {
   const inputId = useId();
+  const [draftName, setDraftName] = useState(singer.displayName);
   const status = readiness?.status ?? "unassigned";
   const statusLabel = readiness?.label ?? `${singer.displayName}, microphone unassigned`;
+
+  useEffect(() => {
+    setDraftName(singer.displayName);
+  }, [singer.displayName]);
+
+  function commitRename() {
+    if (draftName !== singer.displayName) {
+      void onRenameSinger(singer.id, draftName);
+    }
+  }
 
   return (
     <div className="singer-item" data-singer-id={singer.id}>
@@ -78,13 +108,25 @@ function SingerItem({
         id={inputId}
         className="singer-name-input"
         type="text"
-        value={singer.displayName}
-        onChange={(event) => onRenameSinger(singer.id, event.target.value)}
+        value={draftName}
+        disabled={pending}
+        onBlur={commitRename}
+        onChange={(event) => setDraftName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+          if (event.key === "Escape") {
+            setDraftName(singer.displayName);
+            event.currentTarget.blur();
+          }
+        }}
       />
       <button
         className="remove-singer-button"
         type="button"
-        onClick={() => onRemoveSinger(singer.id)}
+        disabled={pending}
+        onClick={() => void onRemoveSinger(singer.id)}
         aria-label={`Remove ${singer.displayName}`}
       >
         Remove

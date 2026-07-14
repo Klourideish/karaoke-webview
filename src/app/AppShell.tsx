@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { AudioPlayer } from "../audioPlayer";
 import { useMediaLibrary } from "../media-library/useMediaLibrary";
 import { useDiagnosticCapture } from "../microphones/useDiagnosticCapture";
@@ -6,6 +7,10 @@ import { useMicrophoneAssignments } from "../microphones/useMicrophoneAssignment
 import { useMicrophoneChannels } from "../microphones/useMicrophoneChannels";
 import { useMicrophoneRecovery } from "../microphones/useMicrophoneRecovery";
 import { BottomMediaBar } from "../player/BottomMediaBar";
+import type { ParticipantCommitProjection } from "../session-singers/types";
+import { useParticipantCommitDiagnostics } from "../session-singers/useParticipantCommitDiagnostics";
+import { SyncDialog } from "../sync/SyncDialog";
+import { eligiblePhysicalMicrophones } from "../sync/types";
 import { useSongLyrics } from "../useSongLyrics";
 import { DeveloperWorkspace } from "../workspaces/DeveloperWorkspace";
 import { LibraryWorkspace } from "../workspaces/LibraryWorkspace";
@@ -24,22 +29,31 @@ export function AppShell({
   activeView,
   audioPlayer,
   mediaLibrary,
-  onAddSinger,
+  onCreateSingerWithMicrophone,
   onRemoveSinger,
   onRenameSinger,
   onSelectTab,
+  singerError,
+  singerMutationPending,
   singers,
 }: {
   activeTab: AppTab;
   activeView: TabDefinition;
   audioPlayer: AudioPlayer;
   mediaLibrary: ReturnType<typeof useMediaLibrary>;
-  onAddSinger: () => void;
-  onRemoveSinger: (id: string) => void;
-  onRenameSinger: (id: string, displayName: string) => void;
+  onCreateSingerWithMicrophone: (
+    requestId: string,
+    displayName: string,
+    sourceId: string,
+  ) => Promise<ParticipantCommitProjection>;
+  onRemoveSinger: (id: string) => Promise<boolean>;
+  onRenameSinger: (id: string, displayName: string) => Promise<unknown>;
   onSelectTab: (tab: AppTab) => void;
+  singerError: string | null;
+  singerMutationPending: string | null;
   singers: Singer[];
 }) {
+  const [syncOpen, setSyncOpen] = useState(false);
   const lyrics = useSongLyrics(audioPlayer.currentSong);
   const microphones = useLocalMicrophones();
   const microphoneAssignments = useMicrophoneAssignments(singers);
@@ -49,6 +63,7 @@ export function AppShell({
     microphoneChannels.channels,
   );
   const diagnosticCapture = useDiagnosticCapture();
+  const participantCommitDiagnostics = useParticipantCommitDiagnostics();
   const singerReadiness = buildSingerReadinessProjections({
     assignments: microphoneAssignments.assignments,
     channels: microphoneChannels.channels,
@@ -56,6 +71,25 @@ export function AppShell({
     singers,
     waitingStates: microphoneAssignments.waitingStates,
   });
+  const eligibleSyncSources = eligiblePhysicalMicrophones({
+    assignments: microphoneAssignments.assignments,
+    channels: microphoneChannels.channels,
+    sources: microphones.sources,
+  });
+
+  async function commitPhysicalParticipant(
+    requestId: string,
+    displayName: string,
+    sourceId: string,
+  ) {
+    try {
+      const result = await onCreateSingerWithMicrophone(requestId, displayName, sourceId);
+      await microphoneChannels.refresh();
+      return result;
+    } finally {
+      await participantCommitDiagnostics.refresh();
+    }
+  }
 
   return (
     <div className="app-shell">
@@ -66,9 +100,11 @@ export function AppShell({
         <SingerBar
           readiness={singerReadiness}
           singers={singers}
-          onAddSinger={onAddSinger}
+          onOpenSync={() => setSyncOpen(true)}
           onRemoveSinger={onRemoveSinger}
           onRenameSinger={onRenameSinger}
+          error={singerError}
+          pendingMutation={singerMutationPending}
         />
 
         <TabRail activeTab={activeTab} onSelectTab={onSelectTab} />
@@ -82,6 +118,7 @@ export function AppShell({
             microphoneChannels={microphoneChannels}
             microphoneRecovery={microphoneRecovery}
             diagnosticCapture={diagnosticCapture}
+            participantCommitDiagnostics={participantCommitDiagnostics}
             onSelectTab={onSelectTab}
             singers={singers}
             view={activeView}
@@ -92,6 +129,14 @@ export function AppShell({
 
       <BottomMediaBar audioPlayer={audioPlayer} />
       {audioPlayer.audioElement}
+      {syncOpen ? (
+        <SyncDialog
+          eligibleSources={eligibleSyncSources}
+          onClose={() => setSyncOpen(false)}
+          onCommit={commitPhysicalParticipant}
+          onSuccess={() => setSyncOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -105,6 +150,7 @@ function MainContent({
   microphoneChannels,
   microphoneRecovery,
   diagnosticCapture,
+  participantCommitDiagnostics,
   onSelectTab,
   singers,
   view,
@@ -117,6 +163,7 @@ function MainContent({
   microphoneChannels: ReturnType<typeof useMicrophoneChannels>;
   microphoneRecovery: ReturnType<typeof useMicrophoneRecovery>;
   diagnosticCapture: ReturnType<typeof useDiagnosticCapture>;
+  participantCommitDiagnostics: ReturnType<typeof useParticipantCommitDiagnostics>;
   onSelectTab: (tab: AppTab) => void;
   singers: Singer[];
   view: TabDefinition;
@@ -149,6 +196,7 @@ function MainContent({
         capture={diagnosticCapture}
         channelRegistry={microphoneChannels}
         discovery={microphones}
+        participantCommitDiagnostics={participantCommitDiagnostics}
         recovery={microphoneRecovery}
         singers={singers}
         assignments={microphoneAssignments}

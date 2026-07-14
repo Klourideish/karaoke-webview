@@ -9,6 +9,7 @@ import type { useLocalMicrophones } from "../microphones/useLocalMicrophones";
 import type { useMicrophoneAssignments } from "../microphones/useMicrophoneAssignments";
 import type { useMicrophoneChannels } from "../microphones/useMicrophoneChannels";
 import type { useMicrophoneRecovery } from "../microphones/useMicrophoneRecovery";
+import type { useParticipantCommitDiagnostics } from "../session-singers/useParticipantCommitDiagnostics";
 import { usePerformanceMicrophoneReadiness } from "../microphones/usePerformanceMicrophoneReadiness";
 
 export function DeveloperWorkspace({
@@ -16,6 +17,7 @@ export function DeveloperWorkspace({
   capture,
   channelRegistry,
   discovery,
+  participantCommitDiagnostics,
   recovery,
   singers,
 }: {
@@ -23,6 +25,7 @@ export function DeveloperWorkspace({
   capture: ReturnType<typeof useDiagnosticCapture>;
   channelRegistry: ReturnType<typeof useMicrophoneChannels>;
   discovery: ReturnType<typeof useLocalMicrophones>;
+  participantCommitDiagnostics: ReturnType<typeof useParticipantCommitDiagnostics>;
   recovery: ReturnType<typeof useMicrophoneRecovery>;
   singers: Singer[];
 }) {
@@ -130,6 +133,45 @@ export function DeveloperWorkspace({
       </div>
 
       <div className="developer-diagnostics-panel">
+        <section className="developer-panel" aria-labelledby="participant-commit-heading">
+          <div>
+            <p className="region-label">Developer</p>
+            <h3 id="participant-commit-heading">Participant onboarding verification</h3>
+          </div>
+          <p className="view-description">
+            Read-only confirmation that singer and microphone setup used the atomic Host commit.
+          </p>
+          <DiagnosticText>
+            <p>Request: {participantCommitDiagnostics.diagnostics.requestId ?? "None yet"}</p>
+            <p>Result: {readableState(participantCommitDiagnostics.diagnostics.outcome)}</p>
+            <p>
+              Singer: {participantCommitDiagnostics.diagnostics.singerName ?? "None"} / Source:{" "}
+              {participantCommitDiagnostics.diagnostics.sourceDisplayName ?? "None"}
+            </p>
+            <p>
+              Microphone: {participantCommitDiagnostics.diagnostics.microphoneState ?? "None"} /
+              Rollback: {participantCommitDiagnostics.diagnostics.rollbackOccurred ? "Yes" : "No"}
+            </p>
+            {participantCommitDiagnostics.diagnostics.failureMessage ? (
+              <p>
+                Last failure: {participantCommitDiagnostics.diagnostics.failureMessage} ({" "}
+                {participantCommitDiagnostics.diagnostics.failureReason})
+              </p>
+            ) : null}
+          </DiagnosticText>
+          {participantCommitDiagnostics.error ? (
+            <p className="microphone-error" role="alert">
+              {participantCommitDiagnostics.error}
+            </p>
+          ) : null}
+          <ol className="participant-verification-checklist">
+            <li>Open Sync and choose a physical microphone.</li>
+            <li>Click Next, enter a singer name, and confirm.</li>
+            <li>Verify the singer, assignment, and readiness dot.</li>
+            <li>Retry once and confirm no duplicate singer appears.</li>
+            <li>Unassign the microphone, then remove the singer.</li>
+          </ol>
+        </section>
         <section className="developer-panel" aria-labelledby="development-protocol-heading">
           <div>
             <p className="region-label">Developer</p>

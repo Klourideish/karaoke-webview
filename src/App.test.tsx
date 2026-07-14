@@ -12,6 +12,7 @@ import type {
   PerformanceMicrophoneReadiness,
 } from "./microphones/types";
 import type { DiagnosticCaptureSnapshot } from "./microphones/diagnosticCapture";
+import type { ParticipantCommitDiagnosticProjection } from "./session-singers/types";
 
 const tauriMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -161,6 +162,26 @@ const microphoneWaitingState = {
   message: "No available unassigned microphone channel or source was found.",
   sequence: 1,
 };
+
+const initialSessionSingers = [
+  { id: "singer-1", displayName: "Singer 1", createdOrder: 1 },
+  { id: "singer-2", displayName: "Singer 2", createdOrder: 2 },
+  { id: "singer-3", displayName: "Singer 3", createdOrder: 3 },
+  { id: "singer-4", displayName: "Singer 4", createdOrder: 4 },
+];
+
+const emptyParticipantCommitDiagnostics = {
+  requestId: null,
+  outcome: "none" as const,
+  singerName: null,
+  sourceDisplayName: null,
+  microphoneState: null,
+  rollbackOccurred: false,
+  failureReason: null,
+  failureMessage: null,
+};
+let sessionSingerState = initialSessionSingers.map((singer) => ({ ...singer }));
+let nextSessionSingerNumber = 5;
 
 const disconnectedRecoveryState = {
   channelId: microphoneChannel.id,
@@ -392,7 +413,20 @@ function mockInvokeWith({
   lyricResult?: LyricDocument;
 } = {}) {
   tauriMocks.invoke.mockImplementation(
-    (command: string, args?: { song?: MediaSong; sourceId?: string }) => {
+    (
+      command: string,
+      args?: {
+        song?: MediaSong;
+        sourceId?: string;
+        singerId?: string;
+        request?: {
+          singerId?: string;
+          displayName?: string | null;
+          requestId?: string;
+          sourceId?: string;
+        };
+      },
+    ) => {
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: loadRoot });
       }
@@ -435,6 +469,64 @@ function mockInvokeWith({
 
       if (command === "discover_local_microphone_sources") {
         return Promise.resolve([]);
+      }
+
+      if (command === "list_session_singers") {
+        return Promise.resolve(sessionSingerState.map((singer) => ({ ...singer })));
+      }
+
+      if (command === "create_session_singer") {
+        const singer = {
+          id: `singer-${nextSessionSingerNumber}`,
+          displayName: args?.request?.displayName ?? `Singer ${nextSessionSingerNumber}`,
+          createdOrder: nextSessionSingerNumber,
+        };
+        nextSessionSingerNumber += 1;
+        sessionSingerState = [...sessionSingerState, singer];
+        return Promise.resolve(singer);
+      }
+
+      if (command === "create_session_singer_with_microphone") {
+        const singer = {
+          id: `singer-${nextSessionSingerNumber}`,
+          displayName: args?.request?.displayName ?? `Singer ${nextSessionSingerNumber}`,
+          createdOrder: nextSessionSingerNumber,
+        };
+        nextSessionSingerNumber += 1;
+        sessionSingerState = [...sessionSingerState, singer];
+        return Promise.resolve({
+          sessionSinger: singer,
+          microphoneState: "ready",
+          sourceDisplayName: "USB Microphone",
+          assignmentSucceeded: true,
+        });
+      }
+
+      if (command === "get_participant_commit_diagnostics") {
+        return Promise.resolve(emptyParticipantCommitDiagnostics);
+      }
+
+      if (command === "rename_session_singer") {
+        const singerId = args?.request?.singerId;
+        const displayName = args?.request?.displayName ?? "";
+        const singer = sessionSingerState.find((candidate) => candidate.id === singerId);
+        if (!singer) {
+          return Promise.reject({ reasonCode: "singer-not-found", message: "Singer not found." });
+        }
+        const renamed = { ...singer, displayName };
+        sessionSingerState = sessionSingerState.map((candidate) =>
+          candidate.id === singerId ? renamed : candidate,
+        );
+        return Promise.resolve(renamed);
+      }
+
+      if (command === "remove_session_singer") {
+        const singer = sessionSingerState.find((candidate) => candidate.id === args?.singerId);
+        if (!singer) {
+          return Promise.reject({ reasonCode: "singer-not-found", message: "Singer not found." });
+        }
+        sessionSingerState = sessionSingerState.filter((candidate) => candidate.id !== singer.id);
+        return Promise.resolve(singer);
       }
 
       if (command === "get_development_protocol_status") {
@@ -503,7 +595,7 @@ function mockInvokeWith({
         return Promise.resolve([]);
       }
 
-      if (command === "sync_session_singers" || command === "list_microphone_assignments") {
+      if (command === "list_microphone_assignments") {
         return Promise.resolve([]);
       }
 
@@ -561,6 +653,14 @@ function mockSuccessfulLibraryInvoke(command: string) {
     return Promise.resolve([]);
   }
 
+  if (command === "list_session_singers") {
+    return Promise.resolve(sessionSingerState.map((singer) => ({ ...singer })));
+  }
+
+  if (command === "get_participant_commit_diagnostics") {
+    return Promise.resolve(emptyParticipantCommitDiagnostics);
+  }
+
   if (command === "get_development_protocol_status") {
     return Promise.resolve(stoppedDevelopmentStatus);
   }
@@ -612,7 +712,7 @@ function mockSuccessfulLibraryInvoke(command: string) {
     return Promise.resolve([]);
   }
 
-  if (command === "sync_session_singers" || command === "list_microphone_assignments") {
+  if (command === "list_microphone_assignments") {
     return Promise.resolve([]);
   }
 
@@ -639,6 +739,8 @@ beforeEach(() => {
   tauriMocks.invoke.mockReset();
   tauriMocks.open.mockReset();
   tauriMocks.open.mockResolvedValue(null);
+  sessionSingerState = initialSessionSingers.map((singer) => ({ ...singer }));
+  nextSessionSingerNumber = 5;
   nextAnimationFrameId = 1;
   animationFrameCallbacks = new Map<number, FrameRequestCallback>();
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -853,6 +955,7 @@ describe("Microphone workspace", () => {
     developmentDiagnostics?: DevelopmentStreamDiagnostics;
     monitorStatus?: typeof idleDiagnosticMonitorStatus;
     monitorDiagnostics?: typeof idleDiagnosticMonitorDiagnostics;
+    participantCommitFailures?: number;
   };
 
   function mockMicrophoneWorkspace(state: MicrophoneInvokeState = {}) {
@@ -866,11 +969,94 @@ describe("Microphone workspace", () => {
     let developmentDiagnostics = state.developmentDiagnostics ?? idleDevelopmentDiagnostics;
     let monitorStatus = state.monitorStatus ?? idleDiagnosticMonitorStatus;
     let monitorDiagnostics = state.monitorDiagnostics ?? idleDiagnosticMonitorDiagnostics;
+    let participantCommitDiagnostics: ParticipantCommitDiagnosticProjection = {
+      ...emptyParticipantCommitDiagnostics,
+    };
+    let participantCommitFailures = state.participantCommitFailures ?? 0;
+    const participantCommitResults = new Map<string, unknown>();
     let nextChannelSequence = 2;
 
     tauriMocks.invoke.mockImplementation((command: string, args?: Record<string, unknown>) => {
       if (command === "discover_local_microphone_sources") {
         return Promise.resolve(sources);
+      }
+
+      if (command === "get_participant_commit_diagnostics") {
+        return Promise.resolve(participantCommitDiagnostics);
+      }
+
+      if (command === "create_session_singer_with_microphone") {
+        const request = (args?.request ?? {}) as {
+          requestId?: string;
+          displayName?: string;
+          sourceId?: string;
+        };
+        const requestId = request.requestId ?? "";
+        const cached = participantCommitResults.get(requestId);
+        if (cached) {
+          return Promise.resolve(cached);
+        }
+        const source = sources.find((candidate) => candidate.id === request.sourceId);
+        if (participantCommitFailures > 0) {
+          participantCommitFailures -= 1;
+          participantCommitDiagnostics = {
+            requestId,
+            outcome: "failure",
+            singerName: request.displayName ?? null,
+            sourceDisplayName: source?.displayName ?? null,
+            microphoneState: null,
+            rollbackOccurred: false,
+            failureReason: "source-unavailable",
+            failureMessage: "The selected microphone is not available.",
+          };
+          return Promise.reject({
+            reasonCode: "source-unavailable",
+            message: "The selected microphone is not available.",
+          });
+        }
+        const singer = {
+          id: `singer-${nextSessionSingerNumber}`,
+          displayName: request.displayName ?? `Singer ${nextSessionSingerNumber}`,
+          createdOrder: nextSessionSingerNumber,
+        };
+        nextSessionSingerNumber += 1;
+        sessionSingerState = [...sessionSingerState, singer];
+        const existingChannel = channels.find((channel) => channel.sourceId === request.sourceId);
+        const channel =
+          existingChannel ??
+          ({
+            id: `microphone-channel-${nextChannelSequence++}`,
+            sourceId: request.sourceId ?? "",
+            sourceDisplayName: source?.displayName ?? "Microphone",
+            state: "available" as const,
+          } as const);
+        if (!existingChannel) {
+          channels = [...channels, channel];
+        }
+        assignments = assignments.concat({
+          channelId: channel.id,
+          singerId: singer.id,
+          method: "manual" as const,
+          sequence: assignments.length + 1,
+        });
+        const result = {
+          sessionSinger: singer,
+          microphoneState: "ready" as const,
+          sourceDisplayName: source?.displayName ?? "Microphone",
+          assignmentSucceeded: true,
+        };
+        participantCommitResults.set(requestId, result);
+        participantCommitDiagnostics = {
+          requestId,
+          outcome: "success",
+          singerName: singer.displayName,
+          sourceDisplayName: result.sourceDisplayName,
+          microphoneState: "ready",
+          rollbackOccurred: false,
+          failureReason: null,
+          failureMessage: null,
+        };
+        return Promise.resolve(result);
       }
 
       if (command === "list_diagnostic_output_devices") {
@@ -949,7 +1135,7 @@ describe("Microphone workspace", () => {
         return Promise.resolve(replaced);
       }
 
-      if (command === "sync_session_singers" || command === "list_microphone_assignments") {
+      if (command === "list_microphone_assignments") {
         return Promise.resolve(assignments);
       }
 
@@ -1111,6 +1297,235 @@ describe("Microphone workspace", () => {
     }
     await openDeveloperWorkspace(user);
   }
+
+  async function openPhysicalSync(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: /Sync/ }));
+    const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
+    await user.click(within(dialog).getByRole("button", { name: "Use physical microphone" }));
+    return dialog;
+  }
+
+  async function completePhysicalSync(
+    user: ReturnType<typeof userEvent.setup>,
+    sourceId = "windows-mic-primary",
+    displayName = "Kyle",
+  ) {
+    const dialog = await openPhysicalSync(user);
+    await user.selectOptions(within(dialog).getByLabelText("Microphone"), sourceId);
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    await user.type(within(dialog).getByLabelText("Singer name"), displayName);
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    return dialog;
+  }
+
+  it("opens a restrained Sync dialog with phone pairing clearly deferred", async () => {
+    mockMicrophoneWorkspace({ sources: [discoveredMicrophones[0]] });
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByDisplayValue("Singer 1")).toBeInTheDocument();
+    expect(screen.queryByText(/empty singer/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Sync/ }));
+
+    const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
+    expect(within(dialog).getByRole("button", { name: "Connect phone" })).toBeDisabled();
+    expect(within(dialog).getByText("QR pairing will be added in P5-002.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Use physical microphone" })).toBeEnabled();
+  });
+
+  it("keeps selection, Back, and Cancel non-mutating", async () => {
+    mockMicrophoneWorkspace({ sources: [discoveredMicrophones[0]] });
+    const user = userEvent.setup();
+    render(<App />);
+
+    const dialog = await openPhysicalSync(user);
+    await user.selectOptions(
+      within(dialog).getByLabelText("Microphone"),
+      discoveredMicrophones[0].id,
+    );
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "create_session_singer_with_microphone",
+      expect.anything(),
+    );
+
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    await user.click(within(dialog).getByRole("button", { name: "Back" }));
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog", { name: "Sync a singer" })).not.toBeInTheDocument();
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "create_session_singer_with_microphone",
+      expect.anything(),
+    );
+  });
+
+  it("shows only eligible unclaimed physical microphone sources", async () => {
+    const networkSource = {
+      id: "network-mic-development-1",
+      displayName: "Android Test",
+      kind: "network-client" as const,
+      availability: "available" as const,
+      isDefault: false as const,
+    };
+    mockMicrophoneWorkspace({
+      sources: [...discoveredMicrophones, secondAvailableMicrophone, networkSource],
+      channels: [microphoneChannel],
+      assignments: [microphoneAssignment],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    const dialog = await openPhysicalSync(user);
+    const selector = within(dialog).getByLabelText("Microphone");
+    expect(within(selector).getByRole("option", { name: "Desk Microphone" })).toBeInTheDocument();
+    expect(within(selector).queryByText("USB Microphone")).not.toBeInTheDocument();
+    expect(within(selector).queryByText("Android Test")).not.toBeInTheDocument();
+  });
+
+  it("commits physical onboarding once and updates Host projections", async () => {
+    mockMicrophoneWorkspace({ sources: [discoveredMicrophones[0]] });
+    const user = userEvent.setup();
+    render(<App />);
+
+    const dialog = await completePhysicalSync(user);
+    expect(within(dialog).getByText("Kyle")).toBeInTheDocument();
+    expect(within(dialog).getByText("USB Microphone")).toBeInTheDocument();
+    await user.click(
+      within(dialog).getByRole("button", { name: "Create singer and assign microphone" }),
+    );
+
+    expect(await screen.findByDisplayValue("Kyle")).toBeInTheDocument();
+    expect(screen.getByText("Kyle, microphone ready")).toBeInTheDocument();
+    const commitCalls = tauriMocks.invoke.mock.calls.filter(
+      ([command]) => command === "create_session_singer_with_microphone",
+    );
+    expect(commitCalls).toHaveLength(1);
+    expect(commitCalls[0]?.[1]).toEqual({
+      request: {
+        requestId: expect.any(String),
+        displayName: "Kyle",
+        sourceId: "windows-mic-primary",
+      },
+    });
+    expect(commitCalls[0]?.[1]?.request).not.toHaveProperty("singerId");
+  });
+
+  it("preserves failed form state and reuses the request ID for retry", async () => {
+    mockMicrophoneWorkspace({
+      sources: [discoveredMicrophones[0]],
+      participantCommitFailures: 1,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    const dialog = await completePhysicalSync(user);
+    const confirm = within(dialog).getByRole("button", {
+      name: "Create singer and assign microphone",
+    });
+    await user.click(confirm);
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "The selected microphone is not available.",
+    );
+    expect(within(dialog).getByText("Kyle")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Kyle")).not.toBeInTheDocument();
+    await user.click(
+      within(dialog).getByRole("button", { name: "Create singer and assign microphone" }),
+    );
+
+    expect(await screen.findByDisplayValue("Kyle")).toBeInTheDocument();
+    const requests = tauriMocks.invoke.mock.calls
+      .filter(([command]) => command === "create_session_singer_with_microphone")
+      .map(([, args]) => args?.request?.requestId);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toBe(requests[1]);
+  });
+
+  it("requires a valid singer name before confirmation", async () => {
+    mockMicrophoneWorkspace({ sources: [discoveredMicrophones[0]] });
+    const user = userEvent.setup();
+    render(<App />);
+
+    const dialog = await openPhysicalSync(user);
+    await user.selectOptions(within(dialog).getByLabelText("Microphone"), "windows-mic-primary");
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+    await user.click(within(dialog).getByRole("button", { name: "Next" }));
+
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Enter a singer name.");
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "create_session_singer_with_microphone",
+      expect.anything(),
+    );
+  });
+
+  it("shows participant commit success and failure only in Developer diagnostics", async () => {
+    mockMicrophoneWorkspace({ sources: [discoveredMicrophones[0]] });
+    const user = userEvent.setup();
+    render(<App />);
+
+    const dialog = await completePhysicalSync(user);
+    await user.click(
+      within(dialog).getByRole("button", { name: "Create singer and assign microphone" }),
+    );
+    expect(screen.queryByText("Participant onboarding verification")).not.toBeInTheDocument();
+
+    await openDeveloperWorkspace(user);
+    const panel = screen
+      .getByRole("heading", { name: "Participant onboarding verification" })
+      .closest("section");
+    expect(panel).not.toBeNull();
+    expect(within(panel as HTMLElement).getByText("Result: Success")).toBeInTheDocument();
+    expect(
+      within(panel as HTMLElement).getByText(/Singer: Kyle \/ Source: USB Microphone/),
+    ).toBeInTheDocument();
+    expect(within(panel as HTMLElement).getByText(/Rollback: No/)).toBeInTheDocument();
+  });
+
+  it("projects participant commit failures in Developer without exposing them to operators", async () => {
+    mockMicrophoneWorkspace({
+      sources: [discoveredMicrophones[0]],
+      participantCommitFailures: 1,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    const dialog = await completePhysicalSync(user);
+    await user.click(
+      within(dialog).getByRole("button", { name: "Create singer and assign microphone" }),
+    );
+    expect(await within(dialog).findByRole("alert")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Participant onboarding verification")).not.toBeInTheDocument();
+
+    await openDeveloperWorkspace(user);
+    const panel = screen
+      .getByRole("heading", { name: "Participant onboarding verification" })
+      .closest("section");
+    expect(panel).not.toBeNull();
+    expect(within(panel as HTMLElement).getByText("Result: Failure")).toBeInTheDocument();
+    expect(
+      within(panel as HTMLElement).getByText(/The selected microphone is not available/),
+    ).toBeInTheDocument();
+  });
+
+  it("does not duplicate participant commits under StrictMode", async () => {
+    mockMicrophoneWorkspace({ sources: [discoveredMicrophones[0]] });
+    const user = userEvent.setup();
+    renderStrictApp();
+
+    const dialog = await completePhysicalSync(user);
+    await user.click(
+      within(dialog).getByRole("button", { name: "Create singer and assign microphone" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        tauriMocks.invoke.mock.calls.filter(
+          ([command]) => command === "create_session_singer_with_microphone",
+        ),
+      ).toHaveLength(1),
+    );
+  });
 
   it("shows loading and then an empty available-microphone state", async () => {
     const deferred = createDeferred<LocalMicrophoneSource[]>();
@@ -1648,6 +2063,9 @@ describe("Library workspace", () => {
   it("shows cached songs before background validation resolves", async () => {
     const pendingScan = createDeferred<LibraryScanResult>();
     tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "list_session_singers") {
+        return Promise.resolve(initialSessionSingers);
+      }
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
@@ -1696,6 +2114,9 @@ describe("Library workspace", () => {
       },
     });
     tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "list_session_singers") {
+        return Promise.resolve(initialSessionSingers);
+      }
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
@@ -1733,6 +2154,9 @@ describe("Library workspace", () => {
   it("preserves cached songs when background validation fails", async () => {
     const pendingScan = createDeferred<LibraryScanResult>();
     tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "list_session_singers") {
+        return Promise.resolve(initialSessionSingers);
+      }
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
@@ -1775,6 +2199,9 @@ describe("Library workspace", () => {
   it("does not render a root-mismatched cache", async () => {
     const pendingScan = createDeferred<LibraryScanResult>();
     tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "list_session_singers") {
+        return Promise.resolve(initialSessionSingers);
+      }
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
@@ -1811,6 +2238,9 @@ describe("Library workspace", () => {
   it("does not duplicate authoritative validation scans in StrictMode", async () => {
     const pendingScan = createDeferred<LibraryScanResult>();
     tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "list_session_singers") {
+        return Promise.resolve(initialSessionSingers);
+      }
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
@@ -1853,6 +2283,9 @@ describe("Library workspace", () => {
       resolveScan = resolve;
     });
     tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "list_session_singers") {
+        return Promise.resolve(initialSessionSingers);
+      }
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
@@ -1875,6 +2308,9 @@ describe("Library workspace", () => {
   it("exits restoring and scanning after a successful restored-root scan in StrictMode", async () => {
     const pendingScan = createDeferred<LibraryScanResult>();
     tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "list_session_singers") {
+        return Promise.resolve(initialSessionSingers);
+      }
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
@@ -2633,6 +3069,9 @@ describe("Library workspace", () => {
     const user = userEvent.setup();
     let scanCount = 0;
     tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "list_session_singers") {
+        return Promise.resolve(initialSessionSingers);
+      }
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
@@ -2667,6 +3106,9 @@ describe("Library workspace", () => {
       resolveScan = resolve;
     });
     tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "list_session_singers") {
+        return Promise.resolve(initialSessionSingers);
+      }
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
@@ -2795,6 +3237,9 @@ describe("Library workspace", () => {
   it("exits loading state after a restored-root scan failure", async () => {
     const pendingScan = createDeferred<LibraryScanResult>();
     tauriMocks.invoke.mockImplementation((command: string) => {
+      if (command === "list_session_singers") {
+        return Promise.resolve(initialSessionSingers);
+      }
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
@@ -2890,24 +3335,43 @@ describe("Library workspace", () => {
 });
 
 describe("Singer shell", () => {
-  it("renders and updates the local singer bar", async () => {
+  it("renders Host projections and requests singer mutations without frontend-owned IDs", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     expect(screen.getByRole("region", { name: "Singer bar" })).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Singer 1")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("Singer 1")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Singer 4")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Add singer" }));
-    expect(screen.getByDisplayValue("Singer 5")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sync/ })).toBeInTheDocument();
 
     const singerTwoInput = screen.getByDisplayValue("Singer 2");
     await user.clear(singerTwoInput);
     await user.type(singerTwoInput, "Lead singer");
+    fireEvent.blur(singerTwoInput);
     expect(screen.getByDisplayValue("Lead singer")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("rename_session_singer", {
+        request: { singerId: "singer-2", displayName: "Lead singer" },
+      }),
+    );
 
     await user.click(screen.getByRole("button", { name: "Remove Singer 1" }));
-    expect(screen.queryByDisplayValue("Singer 1")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByDisplayValue("Singer 1")).not.toBeInTheDocument());
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("remove_session_singer", {
+      singerId: "singer-1",
+    });
     expect(screen.getByDisplayValue("Lead singer")).toBeInTheDocument();
+  });
+
+  it("loads Host singers once under StrictMode and does not recreate them", async () => {
+    renderStrictApp();
+    expect(await screen.findByDisplayValue("Singer 1")).toBeInTheDocument();
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "list_session_singers"),
+    ).toHaveLength(1);
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "create_session_singer"),
+    ).toHaveLength(0);
   });
 });
