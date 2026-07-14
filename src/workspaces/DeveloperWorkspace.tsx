@@ -265,6 +265,12 @@ export function DeveloperWorkspace({
               / Queue: {development.diagnostics.receiverQueueDepth}/
               {development.diagnostics.maximumQueueDepth}
             </p>
+            <p>
+              Capture handoff: {development.diagnostics.audioHandoffQueueDepth}/
+              {development.diagnostics.audioHandoffCapacityFrames} frames / Maximum:{" "}
+              {development.diagnostics.audioHandoffMaximumQueueDepth} / Dropped stale frames:{" "}
+              {development.diagnostics.audioHandoffDroppedFrames}
+            </p>
           </DiagnosticText>
           {development.error || development.status.error ? (
             <p className="microphone-error" role="alert">

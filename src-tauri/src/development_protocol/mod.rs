@@ -1,3 +1,4 @@
+mod audio_handoff;
 mod jitter;
 mod manager;
 mod models;

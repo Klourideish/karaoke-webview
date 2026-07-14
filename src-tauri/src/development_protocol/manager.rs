@@ -19,6 +19,7 @@ use crate::{
 };
 
 use super::{
+    audio_handoff::{AudioHandoff, PushResult, ReceiveResult},
     jitter::{JitterBuffer, JitterOutput, JitterReject},
     models::{
         ClientControlMessage, DevelopmentListenerState, DevelopmentProtocolProjection,
@@ -34,6 +35,8 @@ const DEFAULT_BIND_ADDRESS: &str = "127.0.0.1";
 const JITTER_TARGET_MS: u64 = 30;
 const JITTER_MAX_MS: u64 = 60;
 const JITTER_MAX_PACKETS: usize = 6;
+// Development Profile V0 frames are 10 ms; four frames bound the capture handoff to 40 ms.
+const AUDIO_HANDOFF_CAPACITY_FRAMES: usize = 4;
 
 struct ListenerWorkers {
     shutdown: Arc<AtomicBool>,
@@ -56,6 +59,7 @@ struct ProtocolCounters {
     stale_packets: u64,
     late_packets: u64,
     sequence_gaps: u64,
+    audio_handoff_dropped_frames: u64,
 }
 
 struct ActiveConnection {
@@ -73,7 +77,7 @@ struct ActiveStream {
 
 struct MeterSubscriber {
     source_id: String,
-    sender: mpsc::Sender<Vec<i16>>,
+    handoff: Arc<AudioHandoff>,
 }
 
 struct ManagerInner {
@@ -258,11 +262,14 @@ impl DevelopmentProtocolManager {
             let _ = ready.send(Err(message.clone()));
             return Err(message);
         }
-        let (tx, rx) = mpsc::channel::<Vec<i16>>();
-        lock(&self.inner).meter = Some(MeterSubscriber {
+        let handoff = Arc::new(AudioHandoff::new(AUDIO_HANDOFF_CAPACITY_FRAMES));
+        let replaced = lock(&self.inner).meter.replace(MeterSubscriber {
             source_id: source_id.to_string(),
-            sender: tx,
+            handoff: Arc::clone(&handoff),
         });
+        if let Some(replaced) = replaced {
+            replaced.handoff.close_and_clear();
+        }
         let _ = ready.send(Ok(()));
         let started = Instant::now();
         let mut sequence = 0u64;
@@ -275,8 +282,8 @@ impl DevelopmentProtocolManager {
                 self.clear_meter(source_id);
                 return Ok(CaptureEnd::TimedOut);
             }
-            match rx.recv_timeout(Duration::from_millis(50)) {
-                Ok(samples) => {
+            match handoff.receive_timeout(Duration::from_millis(50)) {
+                ReceiveResult::Frame(samples) => {
                     let normalized = samples
                         .iter()
                         .map(|sample| f32::from(*sample) / 32768.0)
@@ -293,8 +300,8 @@ impl DevelopmentProtocolManager {
                     });
                     levels(level);
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                ReceiveResult::Timeout => {}
+                ReceiveResult::Closed => {
                     self.clear_meter(source_id);
                     return Err("Development network microphone stream ended.".to_string());
                 }
@@ -303,13 +310,20 @@ impl DevelopmentProtocolManager {
     }
 
     fn clear_meter(&self, source_id: &str) {
-        let mut inner = lock(&self.inner);
-        if inner
-            .meter
-            .as_ref()
-            .is_some_and(|meter| meter.source_id == source_id)
-        {
-            inner.meter = None;
+        let meter = {
+            let mut inner = lock(&self.inner);
+            if inner
+                .meter
+                .as_ref()
+                .is_some_and(|meter| meter.source_id == source_id)
+            {
+                inner.meter.take()
+            } else {
+                None
+            }
+        };
+        if let Some(meter) = meter {
+            meter.handoff.close_and_clear();
         }
     }
 
@@ -320,13 +334,19 @@ impl DevelopmentProtocolManager {
     }
 
     fn clear_runtime_state(&self, reason: &str) {
-        let mut inner = lock(&self.inner);
-        inner.connection = None;
-        inner.stream = None;
-        inner.meter = None;
-        inner.jitter.clear();
-        inner.closure_reason = Some(reason.to_string());
-        inner.level = MicrophoneLevelSnapshot::idle();
+        let meter = {
+            let mut inner = lock(&self.inner);
+            inner.connection = None;
+            inner.stream = None;
+            let meter = inner.meter.take();
+            inner.jitter.clear();
+            inner.closure_reason = Some(reason.to_string());
+            inner.level = MicrophoneLevelSnapshot::idle();
+            meter
+        };
+        if let Some(meter) = meter {
+            meter.handoff.close_and_clear();
+        }
     }
 
     fn stop_workers(&self) {
@@ -514,7 +534,7 @@ fn handle_control_line(inner: &Arc<Mutex<ManagerInner>>, line: &str) -> Option<H
                     message: "Development Profile V0 requires mono 48 kHz PCM16.".to_string(),
                 });
             }
-            let (connection_id, session_id, source_id, udp_port) = {
+            let (connection_id, session_id, source_id, udp_port, handoff) = {
                 let mut state = lock(inner);
                 let connection_id = format!("development-connection-{}", state.next_connection);
                 let session_id = format!("development-session-{}", state.next_session);
@@ -531,8 +551,17 @@ fn handle_control_line(inner: &Arc<Mutex<ManagerInner>>, line: &str) -> Option<H
                 let _ = client_device_id;
                 state.stream = None;
                 state.jitter.clear();
-                (connection_id, session_id, source_id, state.udp_port)
+                (
+                    connection_id,
+                    session_id,
+                    source_id,
+                    state.udp_port,
+                    state.meter.as_ref().map(|meter| Arc::clone(&meter.handoff)),
+                )
             };
+            if let Some(handoff) = handoff {
+                handoff.clear();
+            }
             Some(HostControlMessage::HostHelloAccepted {
                 profile_version: 0,
                 client_connection_id: connection_id,
@@ -580,6 +609,11 @@ fn handle_control_line(inner: &Arc<Mutex<ManagerInner>>, line: &str) -> Option<H
                 last_valid_packet: None,
             });
             state.jitter.clear();
+            let handoff = state.meter.as_ref().map(|meter| Arc::clone(&meter.handoff));
+            drop(state);
+            if let Some(handoff) = handoff {
+                handoff.clear();
+            }
             Some(HostControlMessage::StreamAuthorized {
                 profile_version: 0,
                 audio_stream_id: stream_id,
@@ -601,8 +635,30 @@ fn handle_control_line(inner: &Arc<Mutex<ManagerInner>>, line: &str) -> Option<H
             }
             let _ = reason_code;
             let mut state = lock(inner);
+            let Some(active_stream_id) = state.stream.as_ref().map(|stream| stream.stream_id)
+            else {
+                state.counters.rejected_control_messages += 1;
+                return Some(HostControlMessage::DevelopmentError {
+                    profile_version: 0,
+                    reason_code: "stream-not-active".to_string(),
+                    message: "No development audio stream is active.".to_string(),
+                });
+            };
+            if active_stream_id != audio_stream_id {
+                state.counters.rejected_control_messages += 1;
+                return Some(HostControlMessage::DevelopmentError {
+                    profile_version: 0,
+                    reason_code: "audio-stream-id-mismatch".to_string(),
+                    message: "The requested development audio stream is not active.".to_string(),
+                });
+            }
             state.stream = None;
             state.jitter.clear();
+            let handoff = state.meter.as_ref().map(|meter| Arc::clone(&meter.handoff));
+            drop(state);
+            if let Some(handoff) = handoff {
+                handoff.clear();
+            }
             Some(HostControlMessage::StreamStopped {
                 profile_version: 0,
                 audio_stream_id,
@@ -703,27 +759,40 @@ fn handle_udp_datagram(inner: &Arc<Mutex<ManagerInner>>, datagram: &[u8]) {
 }
 
 fn deliver_packet(inner: &Arc<Mutex<ManagerInner>>, packet: AudioPacket) {
-    let meter = {
+    let handoff = {
         let mut state = lock(inner);
         state.counters.valid_packets += 1;
         if let Some(stream) = &mut state.stream {
             stream.last_valid_packet = Some(Instant::now());
         }
-        state.meter.as_ref().map(|meter| meter.sender.clone())
+        state.meter.as_ref().map(|meter| Arc::clone(&meter.handoff))
     };
-    if let Some(meter) = meter {
-        let _ = meter.send(packet.samples);
+    if let Some(handoff) = handoff {
+        if matches!(
+            handoff.push(packet.samples),
+            PushResult::Enqueued {
+                dropped_oldest: true
+            }
+        ) {
+            lock(inner).counters.audio_handoff_dropped_frames += 1;
+        }
     }
 }
 
 fn revoke_connection(inner: &Arc<Mutex<ManagerInner>>, reason: &str) {
-    let mut state = lock(inner);
-    state.connection = None;
-    state.stream = None;
-    state.meter = None;
-    state.jitter.clear();
-    state.closure_reason = Some(reason.to_string());
-    state.level = MicrophoneLevelSnapshot::idle();
+    let meter = {
+        let mut state = lock(inner);
+        state.connection = None;
+        state.stream = None;
+        let meter = state.meter.take();
+        state.jitter.clear();
+        state.closure_reason = Some(reason.to_string());
+        state.level = MicrophoneLevelSnapshot::idle();
+        meter
+    };
+    if let Some(meter) = meter {
+        meter.handoff.close_and_clear();
+    }
 }
 
 fn status_from_inner(inner: &ManagerInner) -> DevelopmentProtocolStatus {
@@ -757,6 +826,11 @@ fn diagnostics_from_inner(inner: &ManagerInner) -> DevelopmentStreamDiagnostics 
     } else {
         inner.counters.sequence_gaps as f32 / total_loss_basis as f32
     };
+    let handoff = inner
+        .meter
+        .as_ref()
+        .map(|meter| meter.handoff.snapshot())
+        .unwrap_or_default();
     DevelopmentStreamDiagnostics {
         active_stream_id: inner.stream.as_ref().map(|stream| stream.stream_id),
         packets_received: inner.counters.packets_received,
@@ -773,6 +847,10 @@ fn diagnostics_from_inner(inner: &ManagerInner) -> DevelopmentStreamDiagnostics 
         jitter_window_depth: inner.jitter.depth(),
         jitter_target_ms: JITTER_TARGET_MS,
         jitter_max_ms: JITTER_MAX_MS,
+        audio_handoff_capacity_frames: AUDIO_HANDOFF_CAPACITY_FRAMES,
+        audio_handoff_queue_depth: handoff.depth,
+        audio_handoff_maximum_queue_depth: handoff.maximum_depth,
+        audio_handoff_dropped_frames: inner.counters.audio_handoff_dropped_frames,
         current_source_health: source_health(inner),
         last_valid_packet_age_ms: inner
             .stream
@@ -1013,10 +1091,181 @@ mod tests {
     fn stop_stream_revokes_authorization() {
         let manager = DevelopmentProtocolManager::new();
         authorize(&manager);
+        let response = manager.handle_control_line_for_test(
+            r#"{"type":"stop_stream","profileVersion":0,"audioStreamId":1,"reasonCode":"local_user_stop"}"#,
+        );
+        assert!(matches!(
+            response,
+            Some(HostControlMessage::StreamStopped {
+                audio_stream_id: 1,
+                ..
+            })
+        ));
+        assert!(!manager.projection().status.stream_authorized);
+    }
+
+    #[test]
+    fn stale_stop_stream_id_is_rejected_without_stopping_newer_stream() {
+        let manager = DevelopmentProtocolManager::new();
+        authorize(&manager);
         manager.handle_control_line_for_test(
             r#"{"type":"stop_stream","profileVersion":0,"audioStreamId":1,"reasonCode":"local_user_stop"}"#,
         );
-        assert!(!manager.projection().status.stream_authorized);
+        manager.handle_control_line_for_test(
+            r#"{"type":"request_stream_authorization","profileVersion":0,"captureAttemptId":"attempt-2"}"#,
+        );
+
+        let response = manager.handle_control_line_for_test(
+            r#"{"type":"stop_stream","profileVersion":0,"audioStreamId":1,"reasonCode":"stale_stop"}"#,
+        );
+
+        assert!(matches!(
+            response,
+            Some(HostControlMessage::DevelopmentError { reason_code, .. })
+                if reason_code == "audio-stream-id-mismatch"
+        ));
+        assert_eq!(manager.projection().status.active_stream_id, Some(2));
+    }
+
+    #[test]
+    fn repeated_or_inactive_stop_stream_is_rejected() {
+        let manager = DevelopmentProtocolManager::new();
+        manager.handle_control_line_for_test(hello());
+        let inactive = manager.handle_control_line_for_test(
+            r#"{"type":"stop_stream","profileVersion":0,"audioStreamId":1,"reasonCode":"local_user_stop"}"#,
+        );
+        assert!(matches!(
+            inactive,
+            Some(HostControlMessage::DevelopmentError { reason_code, .. })
+                if reason_code == "stream-not-active"
+        ));
+
+        authorize(&manager);
+        manager.handle_control_line_for_test(
+            r#"{"type":"stop_stream","profileVersion":0,"audioStreamId":1,"reasonCode":"local_user_stop"}"#,
+        );
+        let repeated = manager.handle_control_line_for_test(
+            r#"{"type":"stop_stream","profileVersion":0,"audioStreamId":1,"reasonCode":"duplicate_stop"}"#,
+        );
+        assert!(matches!(
+            repeated,
+            Some(HostControlMessage::DevelopmentError { reason_code, .. })
+                if reason_code == "stream-not-active"
+        ));
+    }
+
+    #[test]
+    fn malformed_stop_stream_id_is_handled_as_malformed_control() {
+        let manager = DevelopmentProtocolManager::new();
+        authorize(&manager);
+        let response = manager.handle_control_line_for_test(
+            r#"{"type":"stop_stream","profileVersion":0,"audioStreamId":"one","reasonCode":"local_user_stop"}"#,
+        );
+        assert!(matches!(
+            response,
+            Some(HostControlMessage::DevelopmentError { reason_code, .. })
+                if reason_code == "malformed-json"
+        ));
+        assert_eq!(manager.projection().status.active_stream_id, Some(1));
+    }
+
+    #[test]
+    fn audio_handoff_drops_oldest_frames_and_reports_bounded_diagnostics() {
+        let manager = DevelopmentProtocolManager::new();
+        authorize(&manager);
+        let source_id = manager.projection().sources[0].id.clone();
+        let handoff = Arc::new(AudioHandoff::new(AUDIO_HANDOFF_CAPACITY_FRAMES));
+        lock(&manager.inner).meter = Some(MeterSubscriber {
+            source_id,
+            handoff: Arc::clone(&handoff),
+        });
+
+        for value in 0..10 {
+            deliver_packet(
+                &manager.inner,
+                AudioPacket {
+                    stream_id: 1,
+                    sequence_number: value as u64,
+                    first_sample_index: value as u64 * 480,
+                    capture_timestamp_nanos: 0,
+                    samples: vec![value; 480],
+                },
+            );
+        }
+
+        let diagnostics = manager.projection().diagnostics;
+        assert_eq!(diagnostics.audio_handoff_capacity_frames, 4);
+        assert_eq!(diagnostics.audio_handoff_queue_depth, 4);
+        assert_eq!(diagnostics.audio_handoff_maximum_queue_depth, 4);
+        assert_eq!(diagnostics.audio_handoff_dropped_frames, 6);
+        for value in 6..10 {
+            assert_eq!(
+                handoff.receive_timeout(Duration::ZERO),
+                ReceiveResult::Frame(vec![value; 480])
+            );
+        }
+    }
+
+    #[test]
+    fn stopping_stream_clears_handoff_without_stale_replay() {
+        let manager = DevelopmentProtocolManager::new();
+        authorize(&manager);
+        let source_id = manager.projection().sources[0].id.clone();
+        let handoff = Arc::new(AudioHandoff::new(AUDIO_HANDOFF_CAPACITY_FRAMES));
+        lock(&manager.inner).meter = Some(MeterSubscriber {
+            source_id,
+            handoff: Arc::clone(&handoff),
+        });
+        handoff.push(vec![1; 480]);
+
+        manager.handle_control_line_for_test(
+            r#"{"type":"stop_stream","profileVersion":0,"audioStreamId":1,"reasonCode":"local_user_stop"}"#,
+        );
+
+        assert_eq!(handoff.snapshot().depth, 0);
+        assert_eq!(
+            handoff.receive_timeout(Duration::ZERO),
+            ReceiveResult::Timeout
+        );
+        manager.handle_control_line_for_test(
+            r#"{"type":"request_stream_authorization","profileVersion":0,"captureAttemptId":"attempt-2"}"#,
+        );
+        handoff.push(vec![2; 480]);
+        assert_eq!(
+            handoff.receive_timeout(Duration::ZERO),
+            ReceiveResult::Frame(vec![2; 480])
+        );
+    }
+
+    #[test]
+    fn capture_stop_and_disconnect_close_and_clear_the_handoff() {
+        let manager = DevelopmentProtocolManager::new();
+        authorize(&manager);
+        let source_id = manager.projection().sources[0].id.clone();
+        let capture_handoff = Arc::new(AudioHandoff::new(AUDIO_HANDOFF_CAPACITY_FRAMES));
+        lock(&manager.inner).meter = Some(MeterSubscriber {
+            source_id: source_id.clone(),
+            handoff: Arc::clone(&capture_handoff),
+        });
+        capture_handoff.push(vec![1; 480]);
+
+        manager.clear_meter(&source_id);
+
+        assert_eq!(capture_handoff.snapshot().depth, 0);
+        assert_eq!(capture_handoff.push(vec![2; 480]), PushResult::Closed);
+
+        let disconnect_handoff = Arc::new(AudioHandoff::new(AUDIO_HANDOFF_CAPACITY_FRAMES));
+        lock(&manager.inner).meter = Some(MeterSubscriber {
+            source_id,
+            handoff: Arc::clone(&disconnect_handoff),
+        });
+        disconnect_handoff.push(vec![3; 480]);
+
+        revoke_connection(&manager.inner, "control-connection-closed");
+
+        assert_eq!(disconnect_handoff.snapshot().depth, 0);
+        assert_eq!(disconnect_handoff.push(vec![4; 480]), PushResult::Closed);
+        assert!(manager.projection().sources.is_empty());
     }
 
     #[test]

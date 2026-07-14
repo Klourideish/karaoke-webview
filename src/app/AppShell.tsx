@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AudioPlayer } from "../audioPlayer";
 import { useMediaLibrary } from "../media-library/useMediaLibrary";
 import { useDiagnosticCapture } from "../microphones/useDiagnosticCapture";
@@ -63,6 +63,15 @@ export function AppShell({
     microphoneChannels.channels,
   );
   const diagnosticCapture = useDiagnosticCapture();
+  const diagnosticWorkspaceOwnsCapture = activeTab === "mic" || activeTab === "developer";
+  const previousDiagnosticOwnership = useRef(diagnosticWorkspaceOwnsCapture);
+  const stopDiagnosticCapture = diagnosticCapture.stop;
+  useEffect(() => {
+    if (previousDiagnosticOwnership.current && !diagnosticWorkspaceOwnsCapture) {
+      void stopDiagnosticCapture();
+    }
+    previousDiagnosticOwnership.current = diagnosticWorkspaceOwnsCapture;
+  }, [diagnosticWorkspaceOwnsCapture, stopDiagnosticCapture]);
   const participantCommitDiagnostics = useParticipantCommitDiagnostics();
   const singerReadiness = buildSingerReadinessProjections({
     assignments: microphoneAssignments.assignments,

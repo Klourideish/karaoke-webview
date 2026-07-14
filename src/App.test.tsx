@@ -266,6 +266,10 @@ const idleDevelopmentDiagnostics: DevelopmentStreamDiagnostics = {
   jitterWindowDepth: 0,
   jitterTargetMs: 30,
   jitterMaxMs: 60,
+  audioHandoffCapacityFrames: 4,
+  audioHandoffQueueDepth: 0,
+  audioHandoffMaximumQueueDepth: 0,
+  audioHandoffDroppedFrames: 0,
   currentSourceHealth: "disconnected",
   lastValidPacketAgeMs: null,
   level: { rms: 0, peak: 0, clipping: false, sequence: 0 },
@@ -1817,6 +1821,102 @@ describe("Microphone workspace", () => {
     expect(within(singerOne).queryByText(/RMS|Peak|Clipping|sequence/i)).not.toBeInTheDocument();
   });
 
+  it("stops explicit diagnostic capture when leaving its owning workspaces", async () => {
+    mockMicrophoneWorkspace({
+      channels: [microphoneChannel],
+      assignments: [microphoneAssignment],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    const singerOne = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
+      "article",
+    )[0];
+    await user.click(within(singerOne).getByRole("button", { name: "Test microphone" }));
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("start_diagnostic_capture", {
+        sourceId: microphoneChannel.sourceId,
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    await waitFor(() =>
+      expect(
+        tauriMocks.invoke.mock.calls.filter(([command]) => command === "stop_diagnostic_capture"),
+      ).toHaveLength(1),
+    );
+
+    await openMicrophoneWorkspace(user);
+    const returnedSinger = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
+      "article",
+    )[0];
+    expect(
+      within(returnedSinger).getByRole("meter", { name: "Singer 1 input level" }),
+    ).toHaveAttribute("aria-valuenow", "0");
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "start_diagnostic_capture"),
+    ).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "stop_diagnostic_capture"),
+    ).toHaveLength(1);
+  });
+
+  it("preserves capture across Microphones and Developer before stopping on exit", async () => {
+    mockMicrophoneWorkspace({
+      channels: [microphoneChannel],
+      assignments: [microphoneAssignment],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    const singerOne = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
+      "article",
+    )[0];
+    await user.click(within(singerOne).getByRole("button", { name: "Test microphone" }));
+    await openDeveloperDiagnostics(user);
+
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "stop_diagnostic_capture"),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Performance" }));
+    await waitFor(() =>
+      expect(
+        tauriMocks.invoke.mock.calls.filter(([command]) => command === "stop_diagnostic_capture"),
+      ).toHaveLength(1),
+    );
+  });
+
+  it("does not duplicate workspace capture cleanup under StrictMode", async () => {
+    mockMicrophoneWorkspace({
+      channels: [microphoneChannel],
+      assignments: [microphoneAssignment],
+    });
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+
+    await openMicrophoneWorkspace(user);
+    const singerOne = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
+      "article",
+    )[0];
+    await user.click(within(singerOne).getByRole("button", { name: "Test microphone" }));
+    await user.click(screen.getByRole("button", { name: "Library" }));
+
+    await waitFor(() =>
+      expect(
+        tauriMocks.invoke.mock.calls.filter(([command]) => command === "stop_diagnostic_capture"),
+      ).toHaveLength(1),
+    );
+  });
+
   it("keeps development controls accessible but outside the primary singer flow", async () => {
     mockMicrophoneWorkspace();
     const user = userEvent.setup();
@@ -1837,6 +1937,7 @@ describe("Microphone workspace", () => {
     expect(screen.getByLabelText("TCP port")).toHaveValue(45820);
     expect(screen.getByLabelText("UDP port")).toHaveValue(45821);
     expect(screen.getByText(/Listener: Stopped \/ TCP 45820 \/ UDP 45821/)).toBeInTheDocument();
+    expect(screen.getByText(/Capture handoff: 0\/4 frames/)).toBeInTheDocument();
   });
 
   it("removes redundant operator workspace heading copy while preserving Developer context", async () => {

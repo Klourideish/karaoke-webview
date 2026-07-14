@@ -14,7 +14,7 @@ It does not provide pairing, authentication, encryption, replay protection, reta
 
 ## Enabling
 
-Open the Microphones workspace and use the **Start Listener** button in the **Network microphone receiver** section.
+Open the Developer workspace and use the **Start Listener** button in the **Network microphone receiver** section.
 
 The listener is not started automatically on application startup.
 
@@ -65,7 +65,7 @@ Useful test streams:
 
 ## Diagnostics
 
-The Microphones workspace shows:
+The Developer workspace shows:
 
 - listener state;
 - bound TCP and UDP ports;
@@ -75,9 +75,14 @@ The Microphones workspace shows:
 - source health;
 - packet counters;
 - jitter queue depth;
+- capture handoff queue depth, maximum depth, and dropped stale frames;
 - sequence gaps.
 
 The existing diagnostic CaptureSession meter consumes valid network PCM through the Host capture boundary.
+
+The V0 capture handoff holds at most four 10 ms frames (40 ms). When a stalled consumer fills it, the Host drops the oldest queued frame before accepting the newest frame. This prevents unbounded memory and latency growth and never replays stale audio. Stream stop, connection loss, listener stop, and CaptureSession stop clear the queue.
+
+`stop_stream` succeeds only when its `audioStreamId` matches the active stream. A stale ID receives `audio-stream-id-mismatch` without stopping a newer stream; a request with no active stream receives `stream-not-active`.
 
 Raw PCM remains in Rust and is never projected to React.
 

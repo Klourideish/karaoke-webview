@@ -321,6 +321,8 @@ Host responds:
 
 The Host must stop accepting packets for that stream immediately.
 
+The requested `audioStreamId` must match the active stream. A stale or mismatched ID receives a typed `audio-stream-id-mismatch` development error and must not stop a newer stream. When no stream is active, the Host returns `stream-not-active`.
+
 ## 8.9 Heartbeat
 
 Either side may send:
@@ -639,6 +641,7 @@ Expose:
 - estimated packet loss;
 - receiver queue depth;
 - jitter-window depth;
+- capture handoff queue depth, maximum depth, and dropped stale frames;
 - source health;
 - current RMS and peak.
 

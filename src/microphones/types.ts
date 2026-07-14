@@ -146,6 +146,10 @@ export type DevelopmentStreamDiagnostics = {
   jitterWindowDepth: number;
   jitterTargetMs: number;
   jitterMaxMs: number;
+  audioHandoffCapacityFrames: number;
+  audioHandoffQueueDepth: number;
+  audioHandoffMaximumQueueDepth: number;
+  audioHandoffDroppedFrames: number;
   currentSourceHealth: DevelopmentSourceHealth;
   lastValidPacketAgeMs: number | null;
   level: { rms: number; peak: number; clipping: boolean; sequence: number };
