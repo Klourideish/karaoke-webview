@@ -13,7 +13,7 @@ const initialSingers: Singer[] = [
 ];
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<AppTab>("perform");
+  const [activeTab, setActiveTab] = useState<AppTab>("performance");
   const [singers, setSingers] = useState<Singer[]>(initialSingers);
   const [nextSingerNumber, setNextSingerNumber] = useState(initialSingers.length + 1);
   const mediaLibrary = useMediaLibrary();

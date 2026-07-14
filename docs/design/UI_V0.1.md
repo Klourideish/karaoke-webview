@@ -29,18 +29,28 @@ The normal operator UI should present singers, songs, queue, microphones, curren
 
 The UI requests. The Host decides. The UI reflects the decision.
 
-## Home
+## Navigation
 
-Purpose: "What needs attention right now?"
+UI v0.1 uses Performance-first navigation:
 
-Show:
+- Performance;
+- Library;
+- Queue;
+- Singers;
+- Microphones;
+- History;
+- Settings;
+- Developer.
 
-- current performance;
-- next performers;
-- compact session summary;
-- actionable warnings only.
+Home is removed from the provisional Host navigation. Current-performance and attention concepts should
+be placed where operators naturally use them rather than collected in a placeholder Home surface.
 
-Do not show low-level diagnostics.
+Normal operator workspaces should not repeat their own title and description at the top of the page.
+Navigation already identifies the active area. Concise navigation help appears through delayed hover or
+keyboard-focus tooltips instead.
+
+Tooltips should feel deliberate rather than eager. Normal operator workspaces should reclaim the
+space left by removed title blocks, with Performance using the available presentation height.
 
 ## Library
 
@@ -133,6 +143,9 @@ Avoid turning this into a full profile/dashboard.
 
 Some participant information, such as "3 songs queued," may be better projected to the Android client rather than occupying the Host performance area.
 
+The persistent singer bar may show compact microphone readiness dots for quick operator awareness.
+Dots should remain restrained, accessible, and derived from Host microphone projections.
+
 ## Microphones
 
 This section reflects the agreed simplified operator model.
@@ -209,7 +222,13 @@ Developer contains:
 
 The insecure development listener belongs here long term.
 
+UI-002 establishes Developer as its own Host workspace so protocol, capture, monitor, and runtime
+diagnostics can remain available without dominating normal operator microphone workflows.
+
 Developer tools must remain available during active development, but should not dominate the public operator experience.
+
+Developer remains the workspace that keeps an explicit heading and explanatory context because it is
+intentionally separate from normal operator flow.
 
 ## Android Companion Direction
 

@@ -527,7 +527,7 @@ function mockInvokeWith({
         return Promise.resolve(idleCaptureSnapshot);
       }
 
-      return Promise.reject(new Error(`Unexpected command: ${command}`));
+      return mockSuccessfulLibraryInvoke(command);
     },
   );
 }
@@ -689,6 +689,11 @@ async function openMicrophoneWorkspace(user = userEvent.setup()) {
   return user;
 }
 
+async function openDeveloperWorkspace(user = userEvent.setup()) {
+  await user.click(screen.getByRole("button", { name: "Developer" }));
+  return user;
+}
+
 function getAudioElement() {
   return screen.getByTestId("persistent-audio-element") as HTMLAudioElement;
 }
@@ -727,24 +732,80 @@ async function playSongFromLibrary(user: ReturnType<typeof userEvent.setup>, tit
 }
 
 describe("App shell", () => {
-  it("shows Perform as the default active workspace", async () => {
+  it("shows Performance as the default active workspace", async () => {
     render(<App />);
 
     expect(screen.getByRole("heading", { name: "Karaoke Webview" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Perform" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Perform" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("heading", { name: "Performance" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Performance" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("load_library_settings"));
   });
 
   it("renders readable horizontal navigation labels", async () => {
     const { container } = render(<App />);
+    const navigation = screen.getByRole("navigation", { name: "Primary sections" });
+    const navButtons = within(navigation).getAllByRole("button");
 
-    expect(screen.getByRole("button", { name: "Perform" })).toHaveTextContent("Perform");
+    expect(navButtons.map((button) => button.textContent)).toEqual([
+      "Performance",
+      "Library",
+      "Queue",
+      "Singers",
+      "Microphones",
+      "History",
+      "Settings",
+      "Developer",
+    ]);
+    expect(screen.queryByRole("button", { name: "Home" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Library" })).toHaveTextContent("Library");
+    expect(screen.getByRole("button", { name: "Queue" })).toHaveTextContent("Queue");
+    expect(screen.getByRole("button", { name: "Performance" })).toHaveTextContent("Performance");
+    expect(screen.getByRole("button", { name: "Singers" })).toHaveTextContent("Singers");
     expect(screen.getByRole("button", { name: "Microphones" })).toHaveTextContent("Microphones");
+    expect(screen.getByRole("button", { name: "History" })).toHaveTextContent("History");
     expect(screen.getByRole("button", { name: "Settings" })).toHaveTextContent("Settings");
+    expect(screen.getByRole("button", { name: "Developer" })).toHaveAttribute(
+      "data-tab-group",
+      "engineering",
+    );
+    expect(screen.getByText("Engineering")).toBeInTheDocument();
     expect(container.querySelector(".rotated-tab-label")).not.toBeInTheDocument();
     await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("load_library_settings"));
+  });
+
+  it("shows accessible delayed navigation help on hover and focus", async () => {
+    render(<App />);
+    await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("load_library_settings"));
+    vi.useFakeTimers();
+
+    const library = screen.getByRole("button", { name: "Library" });
+    fireEvent.mouseEnter(library);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(599));
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Browse songs and add them to the queue.",
+    );
+    expect(library).toHaveAttribute("aria-describedby", "library-tab-tooltip");
+
+    fireEvent.mouseLeave(library);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    const developer = screen.getByRole("button", { name: "Developer" });
+    fireEvent.focus(developer);
+    act(() => vi.advanceTimersByTime(600));
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "Open engineering diagnostics and development tools.",
+    );
+
+    fireEvent.blur(developer);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
   it("keeps the queue and bottom transport rendered while Library is active", async () => {
@@ -753,9 +814,21 @@ describe("App shell", () => {
 
     await user.click(screen.getByRole("button", { name: "Library" }));
 
-    expect(screen.getByRole("heading", { name: "Library" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Library" })).toHaveClass("visually-hidden");
     expect(screen.getByRole("complementary", { name: "Queue" })).toBeInTheDocument();
     expect(screen.getByRole("contentinfo", { name: "Media transport" })).toBeInTheDocument();
+  });
+
+  it("keeps normal workspace content free of obsolete heading wrappers", async () => {
+    const { container } = render(<App />);
+
+    expect(container.querySelector(".perform-view .workspace-header")).not.toBeInTheDocument();
+    expect(container.querySelector(".performance-stage")).toBeInTheDocument();
+
+    await openLibraryWorkspace(userEvent.setup());
+
+    expect(container.querySelector(".library-workspace .workspace-header")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Library" })).toHaveClass("visually-hidden");
   });
 
   it("keeps playback interaction only in the bottom transport", async () => {
@@ -1031,7 +1104,12 @@ describe("Microphone workspace", () => {
   }
 
   async function openDeveloperDiagnostics(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(screen.getByText("Developer diagnostics"));
+    const handoff = screen.queryByRole("button", { name: "Open Developer diagnostics" });
+    if (handoff) {
+      await user.click(handoff);
+      return;
+    }
+    await openDeveloperWorkspace(user);
   }
 
   it("shows loading and then an empty available-microphone state", async () => {
@@ -1223,6 +1301,75 @@ describe("Microphone workspace", () => {
     expect(within(rows[1]).getByText("No microphone selected.")).toBeInTheDocument();
   });
 
+  it("projects compact singer-bar microphone readiness without visible status text", async () => {
+    const secondChannel = {
+      ...disconnectedMicrophoneChannel,
+      id: "microphone-channel-2",
+      sourceId: "windows-mic-secondary",
+    };
+    mockMicrophoneWorkspace({
+      channels: [microphoneChannel, secondChannel],
+      assignments: [
+        microphoneAssignment,
+        {
+          channelId: secondChannel.id,
+          singerId: "singer-3",
+          method: "manual",
+          sequence: 2,
+        },
+      ],
+      recoveryStates: [
+        {
+          ...disconnectedRecoveryState,
+          channelId: secondChannel.id,
+          status: "recovery-failed",
+        },
+      ],
+      waitingStates: [
+        {
+          ...microphoneWaitingState,
+          singerId: "singer-2",
+        },
+      ],
+    });
+    render(<App />);
+
+    const singerBar = screen.getByRole("region", { name: "Singer bar" });
+    expect(within(singerBar).getByText("Singers")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(singerBar).getByText("Singer 1, microphone ready")).toHaveClass(
+        "visually-hidden",
+      ),
+    );
+    expect(within(singerBar).getByText("Singer 2, microphone waiting")).toHaveClass(
+      "visually-hidden",
+    );
+    expect(within(singerBar).getByText("Singer 3, microphone unavailable")).toHaveClass(
+      "visually-hidden",
+    );
+    expect(within(singerBar).getByText("Singer 4, microphone unassigned")).toHaveClass(
+      "visually-hidden",
+    );
+    expect(singerBar.querySelector('[data-status="ready"]')).toHaveAttribute(
+      "title",
+      "Singer 1, microphone ready",
+    );
+    expect(singerBar.querySelector('[data-status="waiting"]')).toHaveAttribute(
+      "title",
+      "Singer 2, microphone waiting",
+    );
+    expect(singerBar.querySelector('[data-status="unavailable"]')).toHaveAttribute(
+      "title",
+      "Singer 3, microphone unavailable",
+    );
+    expect(singerBar.querySelector('[data-status="unassigned"]')).toHaveAttribute(
+      "title",
+      "Singer 4, microphone unassigned",
+    );
+    expect(within(singerBar).queryByText(/^Ready$/)).not.toBeInTheDocument();
+    expect(within(singerBar).queryByText(/^Waiting$/)).not.toBeInTheDocument();
+  });
+
   it("renders a simple input meter and starts capture only after Test microphone", async () => {
     mockMicrophoneWorkspace({
       channels: [microphoneChannel],
@@ -1274,7 +1421,29 @@ describe("Microphone workspace", () => {
     expect(screen.getByLabelText("Bind address")).toHaveValue("127.0.0.1");
     expect(screen.getByLabelText("TCP port")).toHaveValue(45820);
     expect(screen.getByLabelText("UDP port")).toHaveValue(45821);
-    expect(screen.getByText(/Listener: Stopped · TCP 45820 · UDP 45821/)).toBeInTheDocument();
+    expect(screen.getByText(/Listener: Stopped \/ TCP 45820 \/ UDP 45821/)).toBeInTheDocument();
+  });
+
+  it("removes redundant operator workspace heading copy while preserving Developer context", async () => {
+    mockMicrophoneWorkspace();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+
+    expect(screen.getByRole("heading", { name: "Microphones" })).toHaveClass("visually-hidden");
+    expect(screen.queryByText("Operator")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Assign microphones to singers and check that input is working."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+
+    await openDeveloperDiagnostics(user);
+
+    expect(screen.getByRole("heading", { name: "Developer" })).not.toHaveClass("visually-hidden");
+    expect(
+      screen.getByText(/Protocol, capture, monitor and runtime diagnostics/),
+    ).toBeInTheDocument();
   });
 
   it("passes edited development listener bind address and ports to the Host", async () => {
@@ -1330,7 +1499,7 @@ describe("Microphone workspace", () => {
     expect(screen.getByLabelText("TCP port")).toBeDisabled();
     expect(screen.getByLabelText("UDP port")).toBeDisabled();
     expect(
-      screen.getByText(/Listener: Listening · TCP 45820 · UDP 45821 · 127.0.0.1/),
+      screen.getByText(/Listener: Listening \/ TCP 45820 \/ UDP 45821 \/ 127.0.0.1/),
     ).toBeInTheDocument();
   });
 
@@ -1788,7 +1957,7 @@ describe("Library workspace", () => {
     await screen.findByText("Hey Jude");
     const audio = getAudioElement();
 
-    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
     await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.click(screen.getByRole("button", { name: "Library" }));
 
@@ -1806,7 +1975,7 @@ describe("Library workspace", () => {
 
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
     await user.click(screen.getByRole("button", { name: "Settings" }));
 
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
@@ -1895,7 +2064,7 @@ describe("Library workspace", () => {
     );
   });
 
-  it("parses lyrics for a loaded song and updates the Perform view from the audio clock", async () => {
+  it("parses lyrics for a loaded song and updates the Performance view from the audio clock", async () => {
     const user = userEvent.setup();
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     render(<App />);
@@ -1909,7 +2078,7 @@ describe("Library workspace", () => {
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
     const audio = getAudioElement();
     setAudioNumberProperty(audio, "currentTime", 1.2);
     fireEvent.timeUpdate(audio);
@@ -1996,7 +2165,7 @@ describe("Library workspace", () => {
     await openLibraryWorkspace(user);
     await screen.findByText("Hey Jude");
     await playSongFromLibrary(user, "Hey Jude");
-    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
 
     const audio = getAudioElement();
     setAudioNumberProperty(audio, "currentTime", 2.1);
@@ -2079,7 +2248,7 @@ describe("Library workspace", () => {
     await openLibraryWorkspace(user);
     await screen.findByText("Hey Jude");
     await playSongFromLibrary(user, "Hey Jude");
-    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
 
     const audio = getAudioElement();
     setAudioNumberProperty(audio, "currentTime", 1.2);
@@ -2143,7 +2312,7 @@ describe("Library workspace", () => {
     await openLibraryWorkspace(user);
     await screen.findByText("Hey Jude");
     await playSongFromLibrary(user, "Hey Jude");
-    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
     await waitFor(() =>
       expect(container.querySelector(".lyric-line-current")?.textContent).toBe("lalala"),
     );
@@ -2211,7 +2380,7 @@ describe("Library workspace", () => {
     await openLibraryWorkspace(user);
     await screen.findByText("Hey Jude");
     await playSongFromLibrary(user, "Hey Jude");
-    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
     await screen.findByText("Yesterday all my troubles");
 
     const audio = getAudioElement();
@@ -2260,7 +2429,7 @@ describe("Library workspace", () => {
     await openLibraryWorkspace(user);
     await screen.findByText("Hey Jude");
     await playSongFromLibrary(user, "Hey Jude");
-    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
 
     const audio = getAudioElement();
     setAudioNumberProperty(audio, "currentTime", 5);
@@ -2277,7 +2446,7 @@ describe("Library workspace", () => {
     await openLibraryWorkspace(user);
     await screen.findByText("Hey Jude");
     await playSongFromLibrary(user, "Hey Jude");
-    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
     await screen.findByText("Yesterday all my troubles");
 
     const audio = getAudioElement();
@@ -2300,7 +2469,7 @@ describe("Library workspace", () => {
     await openLibraryWorkspace(user);
     await screen.findByText("Hey Jude");
     await playSongFromLibrary(user, "Hey Jude");
-    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
 
     const audio = getAudioElement();
     setAudioNumberProperty(audio, "currentTime", 1.2);
@@ -2335,7 +2504,7 @@ describe("Library workspace", () => {
     await screen.findByText("Hey Jude");
 
     await playSongFromLibrary(user, "Hey Jude");
-    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
 
     expect(
       await screen.findByText("The lyric file is not a supported TTML document."),
@@ -2375,7 +2544,7 @@ describe("Library workspace", () => {
     await screen.findByText("Hey Jude");
     await playSongFromLibrary(user, "Hey Jude");
     await playSongFromLibrary(user, "Jóga");
-    await user.click(screen.getByRole("button", { name: "Perform" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
 
     const audio = getAudioElement();
     setAudioNumberProperty(audio, "currentTime", 1.2);
@@ -2555,7 +2724,7 @@ describe("Library workspace", () => {
         return Promise.resolve(populatedScanResult);
       }
 
-      return Promise.reject(new Error(`Unexpected command: ${command}`));
+      return mockSuccessfulLibraryInvoke(command);
     });
 
     render(<App />);
@@ -2605,7 +2774,7 @@ describe("Library workspace", () => {
         return Promise.resolve(populatedScanResult);
       }
 
-      return Promise.reject(new Error(`Unexpected command: ${command}`));
+      return mockSuccessfulLibraryInvoke(command);
     });
 
     renderStrictApp();
@@ -2689,7 +2858,7 @@ describe("Library workspace", () => {
         return Promise.resolve();
       }
 
-      return Promise.reject(new Error(`Unexpected command: ${command}`));
+      return mockSuccessfulLibraryInvoke(command);
     });
 
     render(<App />);

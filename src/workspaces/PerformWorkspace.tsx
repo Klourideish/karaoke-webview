@@ -8,14 +8,10 @@ import type { SongLyricsState } from "../useSongLyrics";
 
 export function PerformWorkspace({
   audioPlayer,
-  heading,
   lyrics,
-  description,
 }: {
   audioPlayer: AudioPlayer;
-  heading: string;
   lyrics: SongLyricsState;
-  description: string;
 }) {
   const currentSong = audioPlayer.currentSong;
   const lyricSnapshot = useLyricPlaybackClock({
@@ -27,11 +23,9 @@ export function PerformWorkspace({
 
   return (
     <section className="perform-view">
-      <div className="view-heading-group">
-        <p className="region-label">Workspace</p>
-        <h2 id="view-heading">{heading}</h2>
-        <p className="view-description">{description}</p>
-      </div>
+      <h2 id="view-heading" className="visually-hidden">
+        Performance
+      </h2>
 
       <section className="performance-stage" aria-labelledby="performance-stage-title">
         <h3 id="performance-stage-title">Lyrics presentation</h3>

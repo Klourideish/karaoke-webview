@@ -34,15 +34,10 @@ export function LibraryWorkspace({
 
   return (
     <section className="library-workspace" aria-labelledby="view-heading">
+      <h2 id="view-heading" className="visually-hidden">
+        Library
+      </h2>
       <div className="library-header">
-        <div className="view-heading-group">
-          <p className="region-label">Workspace</p>
-          <h2 id="view-heading">Library</h2>
-          <p className="view-description">
-            Choose a folder containing same-folder .opus and .ttml karaoke pairs.
-          </p>
-        </div>
-
         <div className="library-actions" aria-label="Library actions">
           <button className="library-action-button" type="button" onClick={chooseFolder}>
             {hasFolder ? "Change folder" : "Choose music folder"}

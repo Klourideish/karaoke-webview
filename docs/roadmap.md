@@ -41,8 +41,8 @@ Phone interaction is a core product direction, not an optional add-on. Sequence 
 
 Architecture direction and unresolved protocol decisions are tracked in [architecture vision](architecture-vision.md) and [protocol draft](protocol-draft.md).
 
-
 # Platform
+
 ✔ Capture architecture
 ✔ Host ownership
 ✔ Development protocol
@@ -51,10 +51,12 @@ Architecture direction and unresolved protocol decisions are tracked in [archite
 ✔ Diagnostic audio monitoring
 
 # UI
+
 ✔ Initial design language
 ✔ UI v0.1
 
 # Next
+
 → UI consolidation
 → Navigation
 → Queue experience

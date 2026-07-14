@@ -1,5 +1,6 @@
 import { useId } from "react";
 import type { SessionSingerId } from "../host-domain/types";
+import type { SingerReadinessProjection } from "./singerReadiness";
 
 export type Singer = {
   id: SessionSingerId;
@@ -7,16 +8,20 @@ export type Singer = {
 };
 
 export function SingerBar({
+  readiness,
   singers,
   onAddSinger,
   onRemoveSinger,
   onRenameSinger,
 }: {
+  readiness: SingerReadinessProjection[];
   singers: Singer[];
   onAddSinger: () => void;
   onRemoveSinger: (id: string) => void;
   onRenameSinger: (id: string, displayName: string) => void;
 }) {
+  const readinessBySinger = new Map(readiness.map((item) => [item.singerId, item]));
+
   return (
     <section className="singer-bar" aria-label="Singer bar">
       <div className="singer-bar-heading">
@@ -27,6 +32,7 @@ export function SingerBar({
         {singers.map((singer) => (
           <SingerItem
             key={singer.id}
+            readiness={readinessBySinger.get(singer.id)}
             singer={singer}
             onRemoveSinger={onRemoveSinger}
             onRenameSinger={onRenameSinger}
@@ -42,18 +48,29 @@ export function SingerBar({
 }
 
 function SingerItem({
+  readiness,
   singer,
   onRemoveSinger,
   onRenameSinger,
 }: {
+  readiness?: SingerReadinessProjection;
   singer: Singer;
   onRemoveSinger: (id: string) => void;
   onRenameSinger: (id: string, displayName: string) => void;
 }) {
   const inputId = useId();
+  const status = readiness?.status ?? "unassigned";
+  const statusLabel = readiness?.label ?? `${singer.displayName}, microphone unassigned`;
 
   return (
     <div className="singer-item" data-singer-id={singer.id}>
+      <span
+        aria-hidden="true"
+        className="singer-readiness-dot"
+        data-status={status}
+        title={statusLabel}
+      />
+      <span className="visually-hidden">{statusLabel}</span>
       <label className="visually-hidden" htmlFor={inputId}>
         Display name for {singer.displayName}
       </label>
