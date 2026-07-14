@@ -60,6 +60,10 @@ Android serves the participant. It should focus on connection, microphone readin
 
 Android never gains authoritative karaoke-domain control.
 
+Pairing should feel like joining the room, not configuring protocol machinery. Android may propose a
+local participant profile through a QR-based setup flow, but the Host validates, commits, and returns
+the accepted projection.
+
 ## Current Application Relationship
 
 The current desktop app already has a useful shell: Perform, Library, Microphones, Settings, persistent Queue, singer bar, and bottom transport.

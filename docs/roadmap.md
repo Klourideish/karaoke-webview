@@ -23,6 +23,7 @@ Phone interaction is a core product direction, not an optional add-on. Sequence 
 - microphone channel model
 - local microphone capture and control
 - client/protocol proof of concept
+- development QR pairing and participant setup contract
 - Android microphone relay proof of concept in its separate repository
 - queue and performance orchestration
 - history/database foundation

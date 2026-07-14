@@ -146,6 +146,10 @@ Some participant information, such as "3 songs queued," may be better projected 
 The persistent singer bar may show compact microphone readiness dots for quick operator awareness.
 Dots should remain restrained, accessible, and derived from Host microphone projections.
 
+Participant setup may later use a Sync flow. In development, QR pairing lets Android propose a local
+participant profile while the Host validates and commits any singer or microphone changes. Physical
+microphone setup remains a Host operator flow where selection is confirmed before mutation.
+
 ## Microphones
 
 This section reflects the agreed simplified operator model.
@@ -235,6 +239,7 @@ intentionally separate from normal operator flow.
 Normal participant UI should eventually emphasize:
 
 - connected Host;
+- QR pairing and participant setup;
 - microphone ready state;
 - simple input meter;
 - Start/Stop;
