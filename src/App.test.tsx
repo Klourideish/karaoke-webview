@@ -960,6 +960,7 @@ describe("Microphone workspace", () => {
     monitorStatus?: typeof idleDiagnosticMonitorStatus;
     monitorDiagnostics?: typeof idleDiagnosticMonitorDiagnostics;
     participantCommitFailures?: number;
+    microphoneSelectionFailures?: number;
   };
 
   function mockMicrophoneWorkspace(state: MicrophoneInvokeState = {}) {
@@ -978,7 +979,9 @@ describe("Microphone workspace", () => {
     };
     let participantCommitFailures = state.participantCommitFailures ?? 0;
     const participantCommitResults = new Map<string, unknown>();
+    const microphoneSelectionResults = new Map<string, unknown>();
     let nextChannelSequence = 2;
+    let microphoneSelectionFailures = state.microphoneSelectionFailures ?? 0;
 
     tauriMocks.invoke.mockImplementation((command: string, args?: Record<string, unknown>) => {
       if (command === "discover_local_microphone_sources") {
@@ -1060,6 +1063,95 @@ describe("Microphone workspace", () => {
           failureReason: null,
           failureMessage: null,
         };
+        return Promise.resolve(result);
+      }
+
+      if (command === "select_singer_microphone") {
+        const request = (args?.request ?? {}) as {
+          requestId?: string;
+          sessionSingerId?: string;
+          desiredSourceId?: string | null;
+        };
+        const requestId = request.requestId ?? "";
+        const cached = microphoneSelectionResults.get(requestId);
+        if (cached) {
+          return Promise.resolve(cached);
+        }
+        if (microphoneSelectionFailures > 0) {
+          microphoneSelectionFailures -= 1;
+          return Promise.reject({
+            reasonCode: "source-unavailable",
+            message: "The selected microphone is not available.",
+          });
+        }
+        const singerId = request.sessionSingerId ?? "";
+        const existingAssignment = assignments.find(
+          (assignment) => assignment.singerId === singerId,
+        );
+        if (!request.desiredSourceId) {
+          const retainedChannel = existingAssignment
+            ? (channels.find((channel) => channel.id === existingAssignment.channelId) ?? null)
+            : null;
+          assignments = assignments.filter((assignment) => assignment.singerId !== singerId);
+          waitingStates = waitingStates.filter((waiting) => waiting.singerId !== singerId);
+          const result = {
+            sessionSingerId: singerId,
+            status: "cleared" as const,
+            channel: retainedChannel,
+            assignment: null,
+            sourceDisplayName: null,
+          };
+          microphoneSelectionResults.set(requestId, result);
+          return Promise.resolve(result);
+        }
+        const source = sources.find((candidate) => candidate.id === request.desiredSourceId);
+        let channel = existingAssignment
+          ? channels.find((candidate) => candidate.id === existingAssignment.channelId)
+          : channels.find(
+              (candidate) =>
+                candidate.sourceId === request.desiredSourceId &&
+                !assignments.some((assignment) => assignment.channelId === candidate.id),
+            );
+        if (channel && existingAssignment && channel.sourceId !== request.desiredSourceId) {
+          channel = {
+            ...channel,
+            sourceId: request.desiredSourceId,
+            sourceDisplayName: source?.displayName ?? "Microphone",
+            state: "available" as const,
+          };
+          channels = channels.map((candidate) =>
+            candidate.id === channel?.id ? channel : candidate,
+          );
+        }
+        if (!channel) {
+          channel = {
+            id: `microphone-channel-${nextChannelSequence++}`,
+            sourceId: request.desiredSourceId,
+            sourceDisplayName: source?.displayName ?? "Microphone",
+            state: "available" as const,
+          };
+          channels = [...channels, channel];
+        }
+        const assignment =
+          existingAssignment ??
+          ({
+            channelId: channel.id,
+            singerId,
+            method: "manual" as const,
+            sequence: assignments.length + 1,
+          } as const);
+        assignments = assignments
+          .filter((candidate) => candidate.singerId !== singerId)
+          .concat(assignment);
+        waitingStates = waitingStates.filter((waiting) => waiting.singerId !== singerId);
+        const result = {
+          sessionSingerId: singerId,
+          status: "assigned" as const,
+          channel,
+          assignment,
+          sourceDisplayName: source?.displayName ?? "Microphone",
+        };
+        microphoneSelectionResults.set(requestId, result);
         return Promise.resolve(result);
       }
 
@@ -1584,14 +1676,28 @@ describe("Microphone workspace", () => {
     await user.selectOptions(within(singerOne).getByLabelText("Microphone"), "windows-mic-primary");
 
     await waitFor(() =>
-      expect(tauriMocks.invoke).toHaveBeenCalledWith("create_microphone_channel", {
-        sourceId: "windows-mic-primary",
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("select_singer_microphone", {
+        request: {
+          requestId: expect.any(String),
+          sessionSingerId: "singer-1",
+          desiredSourceId: "windows-mic-primary",
+        },
       }),
     );
-    expect(tauriMocks.invoke).toHaveBeenCalledWith("assign_microphone_channel", {
-      channelId: expect.stringMatching(/^microphone-channel-/),
-      singerId: "singer-1",
-    });
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "select_singer_microphone"),
+    ).toHaveLength(1);
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "create_microphone_channel",
+      expect.anything(),
+    );
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "assign_microphone_channel",
+      expect.anything(),
+    );
+    await waitFor(() =>
+      expect(within(singerOne).getByLabelText("Microphone")).toHaveValue("windows-mic-primary"),
+    );
   });
 
   it("changes an assigned singer microphone through source replacement", async () => {
@@ -1611,14 +1717,23 @@ describe("Microphone workspace", () => {
     await user.selectOptions(within(singerOne).getByLabelText("Microphone"), "windows-mic-third");
 
     await waitFor(() =>
-      expect(tauriMocks.invoke).toHaveBeenCalledWith("replace_microphone_channel_source", {
-        channelId: microphoneChannel.id,
-        sourceId: secondAvailableMicrophone.id,
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("select_singer_microphone", {
+        request: {
+          requestId: expect.any(String),
+          sessionSingerId: "singer-1",
+          desiredSourceId: secondAvailableMicrophone.id,
+        },
       }),
     );
     expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
-      "unassign_microphone_channel",
+      "replace_microphone_channel_source",
       expect.anything(),
+    );
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "select_singer_microphone"),
+    ).toHaveLength(1);
+    await waitFor(() =>
+      expect(within(singerOne).getByLabelText("Microphone")).toHaveValue("windows-mic-third"),
     );
   });
 
@@ -1638,13 +1753,83 @@ describe("Microphone workspace", () => {
     await user.selectOptions(within(singerOne).getByLabelText("Microphone"), "");
 
     await waitFor(() =>
-      expect(tauriMocks.invoke).toHaveBeenCalledWith("unassign_microphone_channel", {
-        channelId: microphoneChannel.id,
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("select_singer_microphone", {
+        request: {
+          requestId: expect.any(String),
+          sessionSingerId: "singer-1",
+          desiredSourceId: null,
+        },
       }),
+    );
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "unassign_microphone_channel",
+      expect.anything(),
     );
     expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
       "remove_microphone_channel",
       expect.anything(),
+    );
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "select_singer_microphone"),
+    ).toHaveLength(1);
+    await waitFor(() => expect(within(singerOne).getByLabelText("Microphone")).toHaveValue(""));
+  });
+
+  it("preserves the authoritative selection after failure and retries safely", async () => {
+    mockMicrophoneWorkspace({
+      sources: [discoveredMicrophones[0], secondAvailableMicrophone],
+      channels: [microphoneChannel],
+      assignments: [microphoneAssignment],
+      microphoneSelectionFailures: 1,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openMicrophoneWorkspace(user);
+    const singerOne = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
+      "article",
+    )[0];
+    const selector = within(singerOne).getByLabelText("Microphone");
+    await user.selectOptions(selector, secondAvailableMicrophone.id);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The selected microphone is not available.",
+    );
+    expect(selector).toHaveValue(microphoneChannel.sourceId);
+    const firstRequest = tauriMocks.invoke.mock.calls.find(
+      ([command]) => command === "select_singer_microphone",
+    )?.[1]?.request as { requestId: string };
+
+    await user.selectOptions(selector, secondAvailableMicrophone.id);
+    await waitFor(() => expect(selector).toHaveValue(secondAvailableMicrophone.id));
+    const selectionCalls = tauriMocks.invoke.mock.calls.filter(
+      ([command]) => command === "select_singer_microphone",
+    );
+    expect(selectionCalls).toHaveLength(2);
+    expect((selectionCalls[1][1]?.request as { requestId: string }).requestId).toBe(
+      firstRequest.requestId,
+    );
+  });
+
+  it("does not duplicate microphone selection mutations under StrictMode", async () => {
+    mockMicrophoneWorkspace({ sources: [discoveredMicrophones[0]] });
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+
+    await openMicrophoneWorkspace(user);
+    const singerOne = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
+      "article",
+    )[0];
+    await user.selectOptions(within(singerOne).getByLabelText("Microphone"), "windows-mic-primary");
+
+    await waitFor(() =>
+      expect(
+        tauriMocks.invoke.mock.calls.filter(([command]) => command === "select_singer_microphone"),
+      ).toHaveLength(1),
     );
   });
 

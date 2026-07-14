@@ -31,6 +31,20 @@ export type MicrophoneAssignment = {
   sequence: number;
 };
 
+export type MicrophoneSelectionRequest = {
+  requestId: string;
+  sessionSingerId: SessionSingerId;
+  desiredSourceId: MicrophoneSourceId | null;
+};
+
+export type MicrophoneSelectionProjection = {
+  sessionSingerId: SessionSingerId;
+  status: "assigned" | "cleared";
+  channel: LocalMicrophoneChannel | null;
+  assignment: MicrophoneAssignment | null;
+  sourceDisplayName: string | null;
+};
+
 export type MicrophoneWaitingState = {
   singerId: SessionSingerId;
   reason: "no-eligible-microphone";

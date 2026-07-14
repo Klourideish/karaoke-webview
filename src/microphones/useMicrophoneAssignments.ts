@@ -20,36 +20,35 @@ export function useMicrophoneAssignments(singers: readonly Singer[]) {
   const requestVersionRef = useRef(0);
   const singerKey = singers.map((singer) => singer.id).join("\u0000");
 
-  useEffect(() => {
+  const refresh = useCallback(async () => {
     const requestVersion = ++requestVersionRef.current;
     setIsLoading(true);
-    void listMicrophoneAssignments()
-      .then(async (nextAssignments) => ({
-        assignments: nextAssignments,
-        waitingStates: await listMicrophoneWaitingStates(),
-      }))
-      .then((next) => {
-        if (requestVersionRef.current === requestVersion) {
-          setAssignments(next.assignments);
-          setWaitingStates(next.waitingStates);
-          setError(null);
-        }
-      })
-      .catch((cause: unknown) => {
-        console.error("Microphone assignments could not be loaded.", cause);
-        if (requestVersionRef.current === requestVersion) {
-          setError("Could not load microphone assignments.");
-        }
-      })
-      .finally(() => {
-        if (requestVersionRef.current === requestVersion) {
-          setIsLoading(false);
-        }
-      });
+    try {
+      const nextAssignments = await listMicrophoneAssignments();
+      const nextWaitingStates = await listMicrophoneWaitingStates();
+      if (requestVersionRef.current === requestVersion) {
+        setAssignments(nextAssignments);
+        setWaitingStates(nextWaitingStates);
+        setError(null);
+      }
+    } catch (cause) {
+      console.error("Microphone assignments could not be loaded.", cause);
+      if (requestVersionRef.current === requestVersion) {
+        setError("Could not load microphone assignments.");
+      }
+    } finally {
+      if (requestVersionRef.current === requestVersion) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
     return () => {
       requestVersionRef.current += 1;
     };
-  }, [singerKey]);
+  }, [refresh, singerKey]);
 
   const assign = useCallback(async (channelId: string, singerId: string) => {
     const requestVersion = ++requestVersionRef.current;
@@ -167,6 +166,7 @@ export function useMicrophoneAssignments(singers: readonly Singer[]) {
     isLoading,
     pendingChannelId,
     pendingSingerId,
+    refresh,
     unassign,
     waitingStates,
   };

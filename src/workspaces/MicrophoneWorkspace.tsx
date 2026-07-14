@@ -5,6 +5,7 @@ import type { useLocalMicrophones } from "../microphones/useLocalMicrophones";
 import type { useMicrophoneAssignments } from "../microphones/useMicrophoneAssignments";
 import type { useMicrophoneChannels } from "../microphones/useMicrophoneChannels";
 import type { useMicrophoneRecovery } from "../microphones/useMicrophoneRecovery";
+import { useMicrophoneSelection } from "../microphones/useMicrophoneSelection";
 import type {
   LocalMicrophoneChannel,
   LocalMicrophoneSource,
@@ -59,6 +60,7 @@ export function MicrophoneWorkspace({
     [discovery.sources],
   );
   const { snapshot: captureSnapshot, start: startCapture, stop: stopCapture } = capture;
+  const microphoneSelection = useMicrophoneSelection();
 
   const usedSourceIds = useMemo(
     () => new Set(channelRegistry.channels.map((channel) => channel.sourceId)),
@@ -86,49 +88,19 @@ export function MicrophoneWorkspace({
   );
 
   async function refreshMicrophoneState() {
-    await Promise.all([channelRegistry.refresh(), recovery.refresh(), discovery.refresh()]);
+    await Promise.all([
+      assignments.refresh(),
+      channelRegistry.refresh(),
+      recovery.refresh(),
+      discovery.refresh(),
+    ]);
   }
 
   async function selectSingerMicrophone(view: SingerMicrophoneView, nextSourceId: string) {
-    if (!nextSourceId) {
-      if (view.assignment) {
-        await assignments.unassign(view.assignment.channelId);
-      }
+    const result = await microphoneSelection.select(view.singerId, nextSourceId || null);
+    if (result) {
       await refreshMicrophoneState();
-      return;
     }
-
-    if (view.channel) {
-      if (view.channel.sourceId !== nextSourceId) {
-        if (view.channel.state === "disconnected") {
-          await channelRegistry.replaceDisconnectedSource(view.channel.id, nextSourceId);
-        } else {
-          await channelRegistry.replaceSource(view.channel.id, nextSourceId);
-        }
-      }
-      if (!view.assignment) {
-        await assignments.assign(view.channel.id, view.singerId);
-      }
-      await refreshMicrophoneState();
-      return;
-    }
-
-    const reusableChannel = channelRegistry.channels.find(
-      (channel) =>
-        channel.sourceId === nextSourceId &&
-        !assignments.assignments.some((assignment) => assignment.channelId === channel.id),
-    );
-    if (reusableChannel) {
-      await assignments.assign(reusableChannel.id, view.singerId);
-      await refreshMicrophoneState();
-      return;
-    }
-
-    const createdChannel = await channelRegistry.create(nextSourceId);
-    if (createdChannel) {
-      await assignments.assign(createdChannel.id, view.singerId);
-    }
-    await refreshMicrophoneState();
   }
 
   async function autoAssignSinger(view: SingerMicrophoneView) {
@@ -143,13 +115,10 @@ export function MicrophoneWorkspace({
   }
 
   async function leaveSingerUnassigned(view: SingerMicrophoneView) {
-    if (view.assignment) {
-      await assignments.unassign(view.assignment.channelId);
+    const result = await microphoneSelection.select(view.singerId, null);
+    if (result) {
+      await refreshMicrophoneState();
     }
-    if (view.waiting) {
-      await assignments.clearWaiting(view.singerId);
-    }
-    await refreshMicrophoneState();
   }
 
   async function testSingerMicrophone(view: SingerMicrophoneView) {
@@ -189,9 +158,15 @@ export function MicrophoneWorkspace({
         {discovery.status === "success" && availableSources.length === 0 ? (
           <p>No available microphones were found.</p>
         ) : null}
-        {assignments.error || channelRegistry.error || recovery.error ? (
+        {assignments.error ||
+        channelRegistry.error ||
+        recovery.error ||
+        microphoneSelection.error ? (
           <p className="microphone-error" role="alert">
-            {assignments.error ?? channelRegistry.error ?? recovery.error}
+            {assignments.error ??
+              channelRegistry.error ??
+              recovery.error ??
+              microphoneSelection.error}
           </p>
         ) : null}
       </div>
@@ -219,7 +194,8 @@ export function MicrophoneWorkspace({
                     assignments.pendingChannelId !== null ||
                     assignments.pendingSingerId !== null ||
                     channelRegistry.pendingAction !== null ||
-                    recovery.pendingChannelId !== null
+                    recovery.pendingChannelId !== null ||
+                    microphoneSelection.pendingSingerId !== null
                   }
                   onChange={(event) => void selectSingerMicrophone(view, event.target.value)}
                 >
@@ -287,7 +263,7 @@ export function MicrophoneWorkspace({
                     <button
                       className="microphone-test-button"
                       type="button"
-                      disabled={assignments.pendingChannelId !== null}
+                      disabled={microphoneSelection.pendingSingerId !== null}
                       onClick={() => void leaveSingerUnassigned(view)}
                     >
                       Leave unassigned
@@ -380,7 +356,12 @@ function buildSingerMicrophoneViews({
         : null;
 
     const options = availableOptions
-      .filter((source) => source.id === channel?.sourceId || !assignedSourceIds.has(source.id))
+      .filter((source) => {
+        if (source.id === channel?.sourceId) return true;
+        const sourceChannel = channels.find((candidate) => candidate.sourceId === source.id);
+        if (!sourceChannel) return true;
+        return !channel && !assignedSourceIds.has(source.id);
+      })
       .map((source) => ({
         id: source.id,
         label: `${source.displayName}${source.isDefault ? " (Default)" : ""}`,

@@ -125,6 +125,23 @@ impl MicrophoneChannelRegistry {
         Ok(channel.clone())
     }
 
+    pub(crate) fn restore_if_matches(
+        &self,
+        expected_current: &MicrophoneChannel,
+        previous: &MicrophoneChannel,
+    ) -> bool {
+        let mut inner = lock(&self.inner);
+        let Some(channel) = inner
+            .channels
+            .iter_mut()
+            .find(|channel| *channel == expected_current)
+        else {
+            return false;
+        };
+        *channel = previous.clone();
+        true
+    }
+
     pub(crate) fn reconcile(&self, sources: &[DiscoveredMicrophoneSource]) {
         let source_by_id = sources
             .iter()

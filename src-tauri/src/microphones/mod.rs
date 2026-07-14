@@ -5,6 +5,7 @@ mod discovery;
 mod models;
 mod performance_readiness;
 mod recovery;
+pub(crate) mod selection;
 
 #[cfg(test)]
 mod tests;
@@ -16,7 +17,7 @@ pub(crate) use assignment_registry::MicrophoneAssignmentRegistry;
 pub(crate) use channel_registry::MicrophoneChannelRegistry;
 #[cfg(test)]
 pub(crate) use models::MicrophoneChannelState;
-use models::{
+pub(crate) use models::{
     AutomaticAssignmentResult, MicrophoneAssignment, MicrophoneChannel, MicrophoneRecoveryState,
     MicrophoneWaitingState, PerformanceMicrophoneReadiness, PerformanceMicrophoneReadinessRequest,
 };

@@ -23,6 +23,7 @@ pub fn run() {
         .manage(microphones::MicrophoneChannelRegistry::default())
         .manage(microphones::MicrophoneRecoveryRegistry::default())
         .manage(microphones::MicrophoneRegistryOperations::default())
+        .manage(microphones::selection::MicrophoneSelectionCoordinator::default())
         .manage(session_singers::SessionSingerRegistry::with_initial_singers(4))
         .manage(participant_commit::ParticipantCommitCoordinator::default())
         .plugin(tauri_plugin_dialog::init())
@@ -64,6 +65,7 @@ pub fn run() {
             microphones::replace_microphone_channel_source,
             microphones::replace_disconnected_microphone_channel_source,
             microphones::retry_microphone_channel_source,
+            microphones::selection::select_singer_microphone,
             session_singers::rename_session_singer,
             media_library::save_library_index,
             media_library::save_library_root,

@@ -84,6 +84,8 @@ This is intentionally focused infrastructure for physical microphone setup and f
 
 Future pairing may submit a validated participant proposal to this coordinator. Pairing remains responsible for offer, claim, setup-token, connection, and policy validation. The participant coordinator remains responsible only for the authoritative singer/source/channel/assignment commit.
 
+Normal microphone changes for an existing singer use the separate Host-owned transaction documented in [HOST_MICROPHONE_SELECTION_TRANSACTION.md](HOST_MICROPHONE_SELECTION_TRANSACTION.md).
+
 ## Host Sync Verification Path
 
 The singer bar exposes a Sync dialog for physical microphone onboarding. Microphone selection, name

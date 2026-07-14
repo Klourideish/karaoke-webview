@@ -7,6 +7,8 @@ import type {
   PerformanceMicrophoneReadiness,
   PerformanceMicrophoneReadinessRequest,
   MicrophoneRecoveryState,
+  MicrophoneSelectionProjection,
+  MicrophoneSelectionRequest,
   MicrophoneWaitingState,
 } from "./types";
 
@@ -49,6 +51,12 @@ export function assignMicrophoneChannel(
 
 export function unassignMicrophoneChannel(channelId: string): Promise<void> {
   return invoke<void>("unassign_microphone_channel", { channelId });
+}
+
+export function selectSingerMicrophone(
+  request: MicrophoneSelectionRequest,
+): Promise<MicrophoneSelectionProjection> {
+  return invoke<MicrophoneSelectionProjection>("select_singer_microphone", { request });
 }
 
 export function autoAssignMicrophoneChannel(singerId: string): Promise<AutomaticAssignmentResult> {
