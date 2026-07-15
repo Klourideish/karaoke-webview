@@ -131,6 +131,14 @@ Do not show:
 
 Lyrics should be displayed as part of the upcoming/current performance experience, not reported as a technical readiness item.
 
+The synchronized lyric presentation uses a restrained rolling window of previous, current, and
+upcoming lines. When authored line timings overlap, the newly active line receives current emphasis
+immediately while the earlier line may remain briefly visible as it leaves. This is presentation-only:
+authored TTML timing, playback authority, seek behavior, and fragment timing remain unchanged.
+Performance lyrics use a large readability-first hierarchy and a friendly rounded local font stack:
+the current line is dominant from several metres away, while previous and upcoming context remains
+legible without competing for attention. Long authored lines wrap naturally without changing text.
+
 Do not overload the performance area with queue or singer statistics.
 
 ## Singers

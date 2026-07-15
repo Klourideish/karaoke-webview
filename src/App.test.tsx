@@ -3150,6 +3150,84 @@ describe("Library workspace", () => {
     expect(screen.getByText("Seemed so far away")).toBeInTheDocument();
   });
 
+  it("promotes overlapping lyrics immediately within a three-row presentation window", async () => {
+    const user = userEvent.setup();
+    const longFirstLine =
+      "First overlap line with punctuation, mixed CASE, and enough words to wrap naturally in a narrower performance window.";
+    const overlappingLyrics: LyricDocument = {
+      ...populatedLyricDocument,
+      lines: [
+        {
+          ...populatedLyricDocument.lines[0],
+          id: "overlap-first",
+          beginMs: 1_000,
+          endMs: 4_000,
+          text: longFirstLine,
+          segments: [],
+        },
+        {
+          ...populatedLyricDocument.lines[1],
+          id: "overlap-second",
+          beginMs: 2_500,
+          endMs: 5_000,
+          text: "Second overlap line",
+          segments: [],
+        },
+        {
+          ...populatedLyricDocument.lines[1],
+          id: "overlap-third",
+          beginMs: 5_500,
+          endMs: 6_500,
+          text: "Third overlap line",
+          segments: [],
+        },
+      ],
+    };
+    mockInvokeWith({
+      loadRoot: "C:\\Music",
+      scanResult: populatedScanResult,
+      lyricResult: overlappingLyrics,
+    });
+    const { container } = render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByRole("button", { name: /The Beatles/ });
+    await playSongFromLibrary(user, "Hey Jude");
+    await user.click(screen.getByRole("button", { name: "Performance" }));
+
+    const audio = getAudioElement();
+    setAudioNumberProperty(audio, "currentTime", 2.4);
+    fireEvent.timeUpdate(audio);
+    const longCurrentLine = await screen.findByText(longFirstLine);
+    expect(longCurrentLine).toHaveClass("lyric-line-current");
+    expect(longCurrentLine).toHaveTextContent(longFirstLine);
+    const secondBeforePromotion = screen.getByText("Second overlap line");
+    expect(secondBeforePromotion).toHaveAttribute("data-presentation-role", "upcoming");
+    expect(secondBeforePromotion).toHaveClass("lyric-line-row", "lyric-line-upcoming");
+
+    setAudioNumberProperty(audio, "currentTime", 2.5);
+    fireEvent.timeUpdate(audio);
+
+    const rows = Array.from(container.querySelectorAll(".lyric-line-row"));
+    expect(rows).toHaveLength(3);
+    expect(rows.map((row) => row.getAttribute("data-presentation-role"))).toEqual([
+      "previous",
+      "current",
+      "upcoming",
+    ]);
+    expect(rows.map((row) => row.getAttribute("data-presentation-lifecycle"))).toEqual([
+      "leaving",
+      "active",
+      "pending",
+    ]);
+    expect(screen.getByText("Second overlap line")).toBe(secondBeforePromotion);
+    expect(secondBeforePromotion).toHaveClass("lyric-line-row", "lyric-line-current");
+    expect(secondBeforePromotion).not.toHaveClass("lyric-line-upcoming");
+    expect(rows[0]).toHaveClass("lyric-line-previous");
+    expect(rows[0]).toHaveAttribute("aria-hidden", "true");
+    expect(rows[2]).toHaveAttribute("aria-hidden", "true");
+    expect(rows[1]).not.toHaveAttribute("aria-hidden");
+  });
+
   it("renders current lyric fragments in source order with static fragment states", async () => {
     const user = userEvent.setup();
     const fragmentLyricDocument: LyricDocument = {
@@ -3260,6 +3338,9 @@ describe("Library workspace", () => {
     expect((fragments[2] as HTMLElement).style.getPropertyValue("--lyric-fill-progress")).toBe(
       "0.2",
     );
+    expect(fragments[2]).toHaveClass("lyric-fragment-active");
+    expect((fragments[2] as HTMLElement).style.textDecoration).toBe("");
+    expect((fragments[2] as HTMLElement).style.borderBottom).toBe("");
     expect(fragments.map((fragment) => fragment.getAttribute("data-text"))).toEqual([
       "Time ",
       "to ",
@@ -3274,7 +3355,10 @@ describe("Library workspace", () => {
     setAudioNumberProperty(audio, "currentTime", 4.2);
     fireEvent.timeUpdate(audio);
     expect(await screen.findByText("다음 줄")).toBeInTheDocument();
-    expect(screen.queryByText("Time to celebrate")).not.toBeInTheDocument();
+    expect(screen.getByText("Time to celebrate")).toHaveAttribute(
+      "data-presentation-role",
+      "previous",
+    );
   });
 
   it("keeps line-level-only lyrics visible without marking a timed fragment active", async () => {
@@ -3451,7 +3535,11 @@ describe("Library workspace", () => {
     fireEvent.timeUpdate(audio);
     expect(screen.queryByLabelText("Instrumental section")).not.toBeInTheDocument();
     expect(screen.getByText("Seemed so far away")).toBeInTheDocument();
-    expect(screen.queryByText("Yesterday all my troubles")).not.toBeInTheDocument();
+    expect(screen.getByText("Yesterday all my troubles")).toHaveAttribute(
+      "data-presentation-role",
+      "previous",
+    );
+    expect(screen.getByText("Yesterday all my troubles")).toHaveAttribute("aria-hidden", "true");
     expect(container.querySelector(".lyric-fragment")).toHaveAttribute(
       "data-fragment-state",
       "upcoming",
@@ -3464,7 +3552,10 @@ describe("Library workspace", () => {
     setAudioNumberProperty(audio, "currentTime", 4.2);
     fireEvent.timeUpdate(audio);
     expect(screen.getByText("Seemed so far away")).toBeInTheDocument();
-    expect(screen.queryByText("Yesterday all my troubles")).not.toBeInTheDocument();
+    expect(screen.getByText("Yesterday all my troubles")).toHaveAttribute(
+      "data-presentation-role",
+      "previous",
+    );
 
     setAudioNumberProperty(audio, "currentTime", 1.1);
     fireEvent.timeUpdate(audio);

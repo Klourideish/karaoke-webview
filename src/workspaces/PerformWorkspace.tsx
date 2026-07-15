@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import type { AudioPlayer } from "../audioPlayer";
-import { lyricFragmentProgress, type ActiveLyricState } from "../lyricTiming";
+import { presentationLineProgress, type LyricPresentationRow } from "../lyricPresentation";
+import { lyricFragmentProgress } from "../lyricTiming";
 import type { LyricLine, LyricSegment } from "../lyrics";
 import { playbackStatusLabel } from "../player/playbackFormatting";
 import { useLyricPlaybackClock } from "../useLyricPlaybackClock";
@@ -20,6 +21,8 @@ export function PerformWorkspace({
   });
   const currentTimeMs = lyricSnapshot?.sampledTimeMs ?? audioPlayer.currentTime * 1_000;
   const lyricState = lyricSnapshot?.state ?? null;
+  const presentationRows = lyricSnapshot?.presentationRows ?? [];
+  const currentRow = presentationRows.find((row) => row.role === "current") ?? null;
 
   return (
     <section className="perform-view">
@@ -41,19 +44,25 @@ export function PerformWorkspace({
               <div
                 className="lyric-line-stack"
                 aria-label="Synchronized lyrics"
-                data-progress={lyricState.currentLineProgress.toFixed(3)}
+                data-progress={
+                  currentRow
+                    ? presentationLineProgress(currentRow.line, currentTimeMs).toFixed(3)
+                    : "0.000"
+                }
                 data-timeline-state={lyricState.timelineState}
               >
-                <p className="lyric-line lyric-line-current">
-                  {lyricState.timelineState === "instrumental-gap" ? (
+                {lyricState.timelineState === "instrumental-gap" ? (
+                  <p
+                    className="lyric-line lyric-line-row lyric-line-current"
+                    data-presentation-lifecycle="active"
+                    data-presentation-role="current"
+                  >
                     <span aria-label="Instrumental section">Instrumental</span>
-                  ) : (
-                    <CurrentLyricLine lyricState={lyricState} currentTimeMs={currentTimeMs} />
-                  )}
-                </p>
-                <p className="lyric-line lyric-line-secondary">
-                  {lyricState.nextLine ? lineText(lyricState.nextLine) : ""}
-                </p>
+                  </p>
+                ) : null}
+                {presentationRows.map((row) => (
+                  <PresentationLyricRow currentTimeMs={currentTimeMs} key={row.line.id} row={row} />
+                ))}
               </div>
             ) : null}
           </div>
@@ -65,18 +74,44 @@ export function PerformWorkspace({
   );
 }
 
-function CurrentLyricLine({
+function PresentationLyricRow({
   currentTimeMs,
-  lyricState,
+  row,
 }: {
   currentTimeMs: number;
-  lyricState: ActiveLyricState;
+  row: LyricPresentationRow;
 }) {
-  const currentLine = lyricState.currentLine;
-  if (!currentLine) {
-    return null;
-  }
+  const current = row.role === "current";
+  const className = [
+    "lyric-line",
+    "lyric-line-row",
+    `lyric-line-${row.role}`,
+    current ? "lyric-line-current" : "lyric-line-secondary",
+  ].join(" ");
 
+  return (
+    <p
+      aria-hidden={current ? undefined : true}
+      className={className}
+      data-presentation-lifecycle={row.lifecycle}
+      data-presentation-role={row.role}
+    >
+      {current ? (
+        <CurrentLyricLine currentLine={row.line} currentTimeMs={currentTimeMs} />
+      ) : (
+        lineText(row.line)
+      )}
+    </p>
+  );
+}
+
+function CurrentLyricLine({
+  currentLine,
+  currentTimeMs,
+}: {
+  currentLine: LyricLine;
+  currentTimeMs: number;
+}) {
   if (currentLine.segments.length === 0) {
     return <>{currentLine.text}</>;
   }
@@ -84,7 +119,7 @@ function CurrentLyricLine({
   return (
     <span className="lyric-fragment-line" aria-label={lineText(currentLine)}>
       {currentLine.segments.map((segment) => {
-        const fragmentState = fragmentDisplayState(segment, lyricState, currentTimeMs);
+        const fragmentState = fragmentDisplayState(currentLine, segment, currentTimeMs);
         const fillProgress = fragmentFillProgress(segment, fragmentState, currentTimeMs);
         return (
           <span
@@ -108,20 +143,30 @@ function CurrentLyricLine({
   );
 }
 
-function fragmentDisplayState(
-  segment: LyricSegment,
-  lyricState: ActiveLyricState,
-  currentTimeMs: number,
-) {
-  if (lyricState.activeFragmentIds.includes(segment.id)) {
+function fragmentDisplayState(line: LyricLine, segment: LyricSegment, currentTimeMs: number) {
+  if (containsTime(segment, currentTimeMs) && !usesOnlyLineTiming(line, segment)) {
     return "active";
   }
 
-  if (currentTimeMs >= segment.endMs || lyricState.currentLineProgress >= 1) {
+  if (currentTimeMs >= segment.endMs) {
     return "past";
   }
 
   return "upcoming";
+}
+
+function containsTime(range: { beginMs: number; endMs: number }, timeMs: number) {
+  return timeMs >= range.beginMs && timeMs < range.endMs;
+}
+
+function usesOnlyLineTiming(line: LyricLine, segment: LyricSegment) {
+  return (
+    segment.beginMs === line.beginMs &&
+    segment.endMs === line.endMs &&
+    line.segments.every(
+      (candidate) => candidate.beginMs === line.beginMs && candidate.endMs === line.endMs,
+    )
+  );
 }
 
 function fragmentFillProgress(

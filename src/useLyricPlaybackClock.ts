@@ -2,10 +2,16 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "rea
 import type { AudioPlayer } from "./audioPlayer";
 import { LyricTimingEngine, type ActiveLyricState } from "./lyricTiming";
 import type { LyricDocument } from "./lyrics";
+import {
+  lyricPresentationSignature,
+  LyricPresentationModel,
+  type LyricPresentationRow,
+} from "./lyricPresentation";
 
 export type LyricPlaybackSnapshot = {
   sampledTimeMs: number;
   state: ActiveLyricState;
+  presentationRows: LyricPresentationRow[];
 };
 
 export function useLyricPlaybackClock({
@@ -18,27 +24,37 @@ export function useLyricPlaybackClock({
   const timingEngine = useMemo(() => {
     return lyricDocument ? new LyricTimingEngine(lyricDocument) : null;
   }, [lyricDocument]);
+  const presentationModel = useMemo(() => {
+    return lyricDocument ? new LyricPresentationModel(lyricDocument.lines) : null;
+  }, [lyricDocument]);
   const [snapshot, setSnapshot] = useState<LyricPlaybackSnapshot | null>(null);
   const signatureRef = useRef<string | null>(null);
   const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
     signatureRef.current = null;
-    if (!timingEngine) {
+    if (!timingEngine || !presentationModel) {
       setSnapshot(null);
       return;
     }
 
-    publishSnapshot(timingEngine, audioPlayer.getCurrentTime, setSnapshot, signatureRef);
+    publishSnapshot(
+      timingEngine,
+      presentationModel,
+      audioPlayer.getCurrentTime,
+      setSnapshot,
+      signatureRef,
+    );
   }, [
     audioPlayer.currentSong?.id,
     audioPlayer.currentTime,
     audioPlayer.getCurrentTime,
+    presentationModel,
     timingEngine,
   ]);
 
   useEffect(() => {
-    if (!timingEngine || audioPlayer.status !== "playing") {
+    if (!timingEngine || !presentationModel || audioPlayer.status !== "playing") {
       return undefined;
     }
 
@@ -61,7 +77,13 @@ export function useLyricPlaybackClock({
         return;
       }
 
-      publishSnapshot(timingEngine, audioPlayer.getCurrentTime, setSnapshot, signatureRef);
+      publishSnapshot(
+        timingEngine,
+        presentationModel,
+        audioPlayer.getCurrentTime,
+        setSnapshot,
+        signatureRef,
+      );
       frameRef.current = requestAnimationFrame(tick);
     }
 
@@ -75,7 +97,13 @@ export function useLyricPlaybackClock({
         return;
       }
 
-      publishSnapshot(timingEngine, audioPlayer.getCurrentTime, setSnapshot, signatureRef);
+      publishSnapshot(
+        timingEngine,
+        presentationModel,
+        audioPlayer.getCurrentTime,
+        setSnapshot,
+        signatureRef,
+      );
       stopFrame();
       frameRef.current = requestAnimationFrame(tick);
     }
@@ -88,13 +116,14 @@ export function useLyricPlaybackClock({
       stopFrame();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [audioPlayer.getCurrentTime, audioPlayer.status, timingEngine]);
+  }, [audioPlayer.getCurrentTime, audioPlayer.status, presentationModel, timingEngine]);
 
   return snapshot;
 }
 
 function publishSnapshot(
   timingEngine: LyricTimingEngine,
+  presentationModel: LyricPresentationModel,
   getCurrentTime: () => number,
   setSnapshot: (
     updater: (current: LyricPlaybackSnapshot | null) => LyricPlaybackSnapshot | null,
@@ -103,7 +132,8 @@ function publishSnapshot(
 ) {
   const sampledTimeMs = getCurrentTime() * 1_000;
   const state = timingEngine.lookup(sampledTimeMs);
-  const signature = lyricStateSignature(state);
+  const presentationRows = presentationModel.lookup(sampledTimeMs, state.timelineState);
+  const signature = lyricStateSignature(state, presentationRows);
   if (signatureRef.current === signature && state.activeFragmentIds.length === 0) {
     return;
   }
@@ -112,16 +142,18 @@ function publishSnapshot(
   setSnapshot(() => ({
     sampledTimeMs,
     state,
+    presentationRows,
   }));
 }
 
-function lyricStateSignature(state: ActiveLyricState) {
+function lyricStateSignature(state: ActiveLyricState, presentationRows: LyricPresentationRow[]) {
   return [
     state.timelineState,
     state.currentLine?.id ?? "",
     state.nextLine?.id ?? "",
     state.activeFragmentIds.join(","),
     state.activeFragmentIndex ?? "",
+    lyricPresentationSignature(presentationRows),
   ].join("|");
 }
 
