@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { chooseLibraryFolder, clearLibraryIndex, saveLibraryIndex, saveLibraryRoot } from "./api";
+import { chooseLibraryFolder } from "./api";
 import { scanResultsMatch } from "./comparison";
 import { errorToMessage } from "./errorFormatting";
 import { filterSongs } from "./search";
-import { loadLibraryIndexOnce, loadLibrarySettingsOnce, scanLibrary } from "./scanCoordinator";
-import type { LibraryScanResult, QueuedScan, QueuedScanOptions } from "./types";
+import { loadLibraryIndexOnce, loadLibrarySettingsOnce, refreshLibrary } from "./scanCoordinator";
+import type { LibraryScanResult, QueuedLibraryRefresh } from "./types";
 
 type LibraryState = {
   restoredRootPath: string | null;
@@ -15,7 +15,6 @@ type LibraryState = {
   statusMessage: string | null;
   searchTerm: string;
   isShowingCachedResult: boolean;
-  isRebuildingIndex: boolean;
 };
 
 export function useMediaLibrary() {
@@ -28,314 +27,182 @@ export function useMediaLibrary() {
     statusMessage: null,
     searchTerm: "",
     isShowingCachedResult: false,
-    isRebuildingIndex: false,
   });
   const isMountedRef = useRef(false);
-  const activeScanRootRef = useRef<string | null>(null);
-  const queuedScanRef = useRef<QueuedScan | null>(null);
+  const activeRefreshRef = useRef<QueuedLibraryRefresh | null>(null);
+  const queuedRefreshRef = useRef<QueuedLibraryRefresh | null>(null);
   const requestedRootRef = useRef<string | null>(null);
 
   useEffect(() => {
     isMountedRef.current = true;
-
     return () => {
       isMountedRef.current = false;
     };
   }, []);
 
-  const runScan = useCallback(async (rootPath: string, options?: QueuedScanOptions) => {
+  const runRefresh = useCallback(async (rootPath: string, selectLocation = false) => {
     requestedRootRef.current = rootPath;
-    if (activeScanRootRef.current) {
-      if (activeScanRootRef.current !== rootPath) {
-        queuedScanRef.current = {
-          rootPath,
-          force: options?.force ?? false,
-          rebuild: options?.rebuild ?? false,
-        };
-        setState((currentState) => ({
-          ...currentState,
-          restoredRootPath: rootPath,
+    if (activeRefreshRef.current) {
+      const active = activeRefreshRef.current;
+      if (active.rootPath !== rootPath || active.selectLocation !== selectLocation) {
+        queuedRefreshRef.current = { rootPath, selectLocation };
+        setState((current) => ({
+          ...current,
           isScanning: true,
-          isRebuildingIndex: options?.rebuild ?? false,
-          statusMessage: options?.rebuild
-            ? "Rebuilding library index..."
-            : "Checking library for changes...",
+          statusMessage: "Refreshing library...",
           error: null,
         }));
       }
       return;
     }
 
-    activeScanRootRef.current = rootPath;
-    setState((currentState) => ({
-      ...currentState,
-      restoredRootPath: rootPath,
+    activeRefreshRef.current = { rootPath, selectLocation };
+    setState((current) => ({
+      ...current,
       isScanning: true,
-      isRebuildingIndex: options?.rebuild ?? false,
-      statusMessage: currentState.scanResult
-        ? currentState.isShowingCachedResult
-          ? "Showing saved library · checking for changes..."
-          : "Checking library for changes..."
-        : options?.rebuild
-          ? "Rebuilding library index..."
-          : "Checking library for changes...",
+      statusMessage: "Refreshing library...",
       error: null,
     }));
 
     try {
-      const scanResult = await scanLibrary(rootPath, options?.force ?? false);
-      const queuedScan = queuedScanRef.current;
+      const result = await refreshLibrary(rootPath, selectLocation);
+      const queued = queuedRefreshRef.current;
       if (
-        !isCurrentRoot(rootPath) ||
+        !isMountedRef.current ||
         requestedRootRef.current !== rootPath ||
-        (queuedScan && queuedScan.rootPath !== rootPath)
+        (queued && queued.rootPath !== rootPath)
       ) {
         return;
       }
-      setState((currentState) => ({
-        ...currentState,
-        restoredRootPath: rootPath,
+      setState((current) => ({
+        ...current,
+        restoredRootPath: result.rootPath,
         isLoadingSettings: false,
-        scanResult: scanResultsMatch(currentState.scanResult, scanResult)
-          ? currentState.scanResult
-          : scanResult,
         isScanning: false,
+        scanResult: scanResultsMatch(current.scanResult, result) ? current.scanResult : result,
         isShowingCachedResult: false,
-        isRebuildingIndex: false,
-        statusMessage: scanResultsMatch(currentState.scanResult, scanResult)
-          ? "Library up to date"
-          : "Library updated",
+        statusMessage: null,
+        searchTerm: selectLocation ? "" : current.searchTerm,
         error: null,
       }));
-
-      if (requestedRootRef.current === rootPath) {
-        try {
-          await saveLibraryIndex(scanResult);
-        } catch (error) {
-          if (requestedRootRef.current === rootPath && isMountedRef.current) {
-            setState((currentState) => ({
-              ...currentState,
-              error: errorToMessage(error, "Could not save the library index."),
-            }));
-          }
-        }
-      }
     } catch (error) {
-      const queuedScan = queuedScanRef.current;
-      if (
-        !isCurrentRoot(rootPath) ||
-        requestedRootRef.current !== rootPath ||
-        (queuedScan && queuedScan.rootPath !== rootPath)
-      ) {
+      if (!isMountedRef.current || requestedRootRef.current !== rootPath) {
         return;
       }
-      setState((currentState) => ({
-        ...currentState,
-        restoredRootPath: rootPath,
+      setState((current) => ({
+        ...current,
         isLoadingSettings: false,
         isScanning: false,
-        isRebuildingIndex: false,
-        statusMessage: currentState.scanResult
-          ? "Library check failed · showing last known results"
-          : null,
-        error: errorToMessage(error, "The library scan failed."),
+        statusMessage: null,
+        error: errorToMessage(error, "The library could not be refreshed."),
       }));
     } finally {
-      if (activeScanRootRef.current === rootPath) {
-        activeScanRootRef.current = null;
+      if (
+        activeRefreshRef.current?.rootPath === rootPath &&
+        activeRefreshRef.current.selectLocation === selectLocation
+      ) {
+        activeRefreshRef.current = null;
       }
-
-      const queuedScan = queuedScanRef.current;
-      if (queuedScan && isMountedRef.current) {
-        queuedScanRef.current = null;
-        void runScan(queuedScan.rootPath, {
-          force: queuedScan.force,
-          rebuild: queuedScan.rebuild,
-        });
+      const queued = queuedRefreshRef.current;
+      if (queued && isMountedRef.current) {
+        queuedRefreshRef.current = null;
+        void runRefresh(queued.rootPath, queued.selectLocation);
       }
     }
   }, []);
 
-  const loadCacheThenScan = useCallback(
-    async (rootPath: string, options?: { force?: boolean }) => {
+  const loadCacheThenRefresh = useCallback(
+    async (rootPath: string) => {
       requestedRootRef.current = rootPath;
-      setState((currentState) => ({
-        ...currentState,
+      setState((current) => ({
+        ...current,
         restoredRootPath: rootPath,
         isLoadingSettings: false,
-        statusMessage: "Checking library for changes...",
+        statusMessage: "Refreshing library...",
         error: null,
       }));
 
       try {
-        const indexLoadResult = await loadLibraryIndexOnce(rootPath);
-        if (!isCurrentRoot(rootPath) || requestedRootRef.current !== rootPath) {
-          return;
-        }
-
-        if (indexLoadResult.scanResult) {
-          setState((currentState) => ({
-            ...currentState,
-            restoredRootPath: rootPath,
-            scanResult: indexLoadResult.scanResult,
+        const cached = await loadLibraryIndexOnce(rootPath);
+        if (!isMountedRef.current || requestedRootRef.current !== rootPath) return;
+        if (cached.scanResult) {
+          setState((current) => ({
+            ...current,
+            scanResult: cached.scanResult,
             isShowingCachedResult: true,
-            isLoadingSettings: false,
-            statusMessage: "Showing saved library · checking for changes...",
-            error: null,
-          }));
-        } else if (indexLoadResult.message) {
-          setState((currentState) => ({
-            ...currentState,
-            statusMessage: indexLoadResult.message,
           }));
         }
       } catch (error) {
-        if (!isCurrentRoot(rootPath) || requestedRootRef.current !== rootPath) {
-          return;
+        if (isMountedRef.current && requestedRootRef.current === rootPath) {
+          setState((current) => ({
+            ...current,
+            error: errorToMessage(error, "Could not load the saved library."),
+          }));
         }
-        setState((currentState) => ({
-          ...currentState,
-          error: errorToMessage(error, "Could not load the saved library index."),
-        }));
       }
 
-      await runScan(rootPath, { force: options?.force ?? false });
+      await runRefresh(rootPath);
     },
-    [runScan],
+    [runRefresh],
   );
 
   useEffect(() => {
     let cancelled = false;
-
     async function restoreSettings() {
       try {
         const settings = await loadLibrarySettingsOnce();
-        if (cancelled || !isMountedRef.current) {
-          return;
-        }
-
-        setState((currentState) => ({
-          ...currentState,
+        if (cancelled || !isMountedRef.current) return;
+        setState((current) => ({
+          ...current,
           restoredRootPath: settings.libraryRoot,
           isLoadingSettings: false,
           error: null,
         }));
-
         if (settings.libraryRoot) {
-          await loadCacheThenScan(settings.libraryRoot);
+          await loadCacheThenRefresh(settings.libraryRoot);
         }
       } catch (error) {
-        if (cancelled || !isMountedRef.current) {
-          return;
+        if (!cancelled && isMountedRef.current) {
+          setState((current) => ({
+            ...current,
+            isLoadingSettings: false,
+            error: errorToMessage(error, "Could not restore the saved library location."),
+          }));
         }
-        setState((currentState) => ({
-          ...currentState,
-          isLoadingSettings: false,
-          error: errorToMessage(error, "Could not restore the saved library folder."),
-        }));
       }
     }
-
     void restoreSettings();
-
     return () => {
       cancelled = true;
     };
-  }, [loadCacheThenScan]);
+  }, [loadCacheThenRefresh]);
 
   const chooseFolder = useCallback(async () => {
     try {
       const selectedFolder = await chooseLibraryFolder();
-      if (!selectedFolder) {
-        return;
-      }
-
-      const settings = await saveLibraryRoot(selectedFolder);
-      const rootPath = settings.libraryRoot ?? selectedFolder;
-      setState((currentState) => ({
-        ...currentState,
-        restoredRootPath: rootPath,
-        scanResult: null,
-        isShowingCachedResult: false,
-        statusMessage: "Checking library for changes...",
-        searchTerm: "",
-        error: null,
-      }));
-      await loadCacheThenScan(rootPath, { force: true });
+      if (selectedFolder) await runRefresh(selectedFolder, true);
     } catch (error) {
-      setState((currentState) => ({
-        ...currentState,
-        error: errorToMessage(error, "Could not choose the music folder."),
+      setState((current) => ({
+        ...current,
+        error: errorToMessage(error, "Could not choose the library location."),
       }));
     }
-  }, [loadCacheThenScan]);
+  }, [runRefresh]);
 
   const rescan = useCallback(async () => {
-    const rootPath = state.restoredRootPath;
-    if (!rootPath || state.isScanning) {
-      return;
+    if (state.restoredRootPath && !state.isScanning) {
+      await runRefresh(state.restoredRootPath);
     }
-
-    await runScan(rootPath, { force: true });
-  }, [runScan, state.isScanning, state.restoredRootPath]);
-
-  const rebuildIndex = useCallback(async () => {
-    const rootPath = state.restoredRootPath;
-    if (!rootPath || state.isScanning || state.isRebuildingIndex) {
-      return;
-    }
-
-    requestedRootRef.current = rootPath;
-    setState((currentState) => ({
-      ...currentState,
-      isRebuildingIndex: true,
-      statusMessage: "Rebuilding library index...",
-      error: null,
-    }));
-
-    try {
-      await clearLibraryIndex(rootPath);
-      if (!isCurrentRoot(rootPath) || requestedRootRef.current !== rootPath) {
-        return;
-      }
-      await runScan(rootPath, { force: true, rebuild: true });
-    } catch (error) {
-      if (!isCurrentRoot(rootPath) || requestedRootRef.current !== rootPath) {
-        return;
-      }
-      setState((currentState) => ({
-        ...currentState,
-        isScanning: false,
-        isRebuildingIndex: false,
-        statusMessage: currentState.scanResult
-          ? "Library check failed · showing last known results"
-          : null,
-        error: errorToMessage(error, "Could not rebuild the library index."),
-      }));
-    }
-  }, [runScan, state.isRebuildingIndex, state.isScanning, state.restoredRootPath]);
+  }, [runRefresh, state.isScanning, state.restoredRootPath]);
 
   const setSearchTerm = useCallback((searchTerm: string) => {
-    setState((currentState) => ({
-      ...currentState,
-      searchTerm,
-    }));
+    setState((current) => ({ ...current, searchTerm }));
   }, []);
 
-  const filteredSongs = useMemo(() => {
-    return filterSongs(state.scanResult?.songs ?? [], state.searchTerm);
-  }, [state.scanResult?.songs, state.searchTerm]);
+  const filteredSongs = useMemo(
+    () => filterSongs(state.scanResult?.songs ?? [], state.searchTerm),
+    [state.scanResult?.songs, state.searchTerm],
+  );
 
-  return {
-    ...state,
-    filteredSongs,
-    chooseFolder,
-    rescan,
-    rebuildIndex,
-    setSearchTerm,
-  };
-
-  function isCurrentRoot(rootPath: string) {
-    return isMountedRef.current && requestedRootRef.current === rootPath;
-  }
+  return { ...state, filteredSongs, chooseFolder, rescan, setSearchTerm };
 }

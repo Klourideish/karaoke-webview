@@ -1,8 +1,13 @@
-import { loadLibraryIndex, loadLibrarySettings, scanMediaLibrary } from "./api";
+import {
+  loadLibraryIndex,
+  loadLibrarySettings,
+  refreshMediaLibrary,
+  selectLibraryLocation,
+} from "./api";
 import type { LibraryIndexLoadResult, LibraryScanResult, LibrarySettings } from "./types";
 
 let pendingSettingsLoad: Promise<LibrarySettings> | null = null;
-const pendingScans = new Map<string, Promise<LibraryScanResult>>();
+const pendingRefreshes = new Map<string, Promise<LibraryScanResult>>();
 const pendingIndexLoads = new Map<string, Promise<LibraryIndexLoadResult>>();
 
 export function loadLibrarySettingsOnce(): Promise<LibrarySettings> {
@@ -28,17 +33,21 @@ export function loadLibraryIndexOnce(rootPath: string): Promise<LibraryIndexLoad
   return indexLoadPromise;
 }
 
-export function scanLibrary(rootPath: string, force = false): Promise<LibraryScanResult> {
-  if (!force) {
-    const pendingScan = pendingScans.get(rootPath);
-    if (pendingScan) {
-      return pendingScan;
-    }
+export function refreshLibrary(
+  rootPath: string,
+  selectLocation = false,
+): Promise<LibraryScanResult> {
+  const key = `${selectLocation ? "select" : "rescan"}\0${rootPath.toLocaleLowerCase()}`;
+  const pendingRefresh = pendingRefreshes.get(key);
+  if (pendingRefresh) {
+    return pendingRefresh;
   }
 
-  const scanPromise = scanMediaLibrary(rootPath).finally(() => {
-    pendingScans.delete(rootPath);
+  const refreshPromise = (
+    selectLocation ? selectLibraryLocation(rootPath) : refreshMediaLibrary(rootPath)
+  ).finally(() => {
+    pendingRefreshes.delete(key);
   });
-  pendingScans.set(rootPath, scanPromise);
-  return scanPromise;
+  pendingRefreshes.set(key, refreshPromise);
+  return refreshPromise;
 }

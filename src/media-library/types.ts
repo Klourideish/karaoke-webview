@@ -50,13 +50,7 @@ export type LibrarySettings = {
   libraryRoot: string | null;
 };
 
-export type QueuedScan = {
-  force: boolean;
-  rebuild?: boolean;
+export type QueuedLibraryRefresh = {
   rootPath: string;
-};
-
-export type QueuedScanOptions = {
-  force?: boolean;
-  rebuild?: boolean;
+  selectLocation: boolean;
 };

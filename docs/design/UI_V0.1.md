@@ -61,7 +61,9 @@ Decisions:
 - no public Play button;
 - normal action is Add to Queue;
 - search remains primary;
-- support artist-grouped browsing and folders;
+- the primary controls are Library location and Rescan;
+- choosing a location and rescanning both request one complete Host-owned scan and index refresh;
+- artists and their songs are presented alphabetically in independently collapsible groups;
 - artist grouping should make large libraries easier to browse;
 - unavailable songs show a simple reason;
 - technical media diagnostics stay in Developer or Advanced Library Diagnostics.
@@ -69,9 +71,12 @@ Decisions:
 Example:
 
 ```text
-Artist
+Library location  Rescan
+
+42 songs · 11 artists
+
+▸ Artist
   Song
-  Add to Queue
 ```
 
 This document does not define filesystem implementation.

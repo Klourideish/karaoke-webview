@@ -193,7 +193,7 @@ function MainContent({
   }
 
   if (view.id === "library") {
-    return <LibraryWorkspace audioPlayer={audioPlayer} mediaLibrary={mediaLibrary} />;
+    return <LibraryWorkspace mediaLibrary={mediaLibrary} />;
   }
 
   if (view.id === "mic") {
@@ -213,10 +213,12 @@ function MainContent({
   if (view.id === "developer") {
     return (
       <DeveloperWorkspace
+        audioPlayer={audioPlayer}
         capture={diagnosticCapture}
         channelRegistry={microphoneChannels}
         discovery={microphones}
         participantCommitDiagnostics={participantCommitDiagnostics}
+        mediaLibrary={mediaLibrary}
         recovery={microphoneRecovery}
         singers={singers}
         assignments={microphoneAssignments}

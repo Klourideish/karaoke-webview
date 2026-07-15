@@ -494,6 +494,8 @@ function mockInvokeWith({
   scanResult?: LibraryScanResult;
   lyricResult?: LyricDocument;
 } = {}) {
+  let monitorStatus = idleDiagnosticMonitorStatus;
+  let monitorDiagnostics = idleDiagnosticMonitorDiagnostics;
   tauriMocks.invoke.mockImplementation(
     (
       command: string,
@@ -545,7 +547,11 @@ function mockInvokeWith({
         });
       }
 
-      if (command === "scan_media_library") {
+      if (command === "refresh_media_library") {
+        return Promise.resolve(scanResult);
+      }
+
+      if (command === "select_library_location") {
         return Promise.resolve(scanResult);
       }
 
@@ -715,7 +721,11 @@ function mockSuccessfulLibraryInvoke(command: string) {
     return Promise.resolve({ status: "miss", scanResult: null, message: null });
   }
 
-  if (command === "scan_media_library") {
+  if (command === "refresh_media_library") {
+    return Promise.resolve(populatedScanResult);
+  }
+
+  if (command === "select_library_location") {
     return Promise.resolve(populatedScanResult);
   }
 
@@ -910,17 +920,10 @@ function runAnimationFrame(time = 0) {
   });
 }
 
-function getSongRow(title: string) {
-  const row = screen.getByText(title).closest("article");
-  if (!row) {
-    throw new Error(`Could not find song row for ${title}`);
-  }
-
-  return row;
-}
-
 async function playSongFromLibrary(user: ReturnType<typeof userEvent.setup>, title: string) {
-  await user.click(within(getSongRow(title)).getByRole("button", { name: "Play" }));
+  await user.click(screen.getByRole("button", { name: "Developer" }));
+  await user.click(screen.getByRole("button", { name: `Test playback: ${title}` }));
+  await user.click(screen.getByRole("button", { name: "Library" }));
 }
 
 describe("App shell", () => {
@@ -2617,10 +2620,13 @@ describe("Library workspace", () => {
 
     await openLibraryWorkspace(user);
 
-    expect(await screen.findByText("No music folder selected.")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Choose music folder" }).length).toBeGreaterThan(
-      0,
-    );
+    expect(await screen.findByText("No library location selected")).toBeInTheDocument();
+    expect(
+      screen.getByText("Choose a library location to browse karaoke songs."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("0 songs · 0 artists")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Library location" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Rescan" })).toBeDisabled();
   });
 
   it("cancelling folder selection preserves the current state", async () => {
@@ -2629,17 +2635,17 @@ describe("Library workspace", () => {
     render(<App />);
 
     await openLibraryWorkspace(user);
-    await screen.findByText("No music folder selected.");
-    await user.click(screen.getAllByRole("button", { name: "Choose music folder" })[0]);
+    await screen.findByText("No library location selected");
+    await user.click(screen.getByRole("button", { name: "Library location" }));
 
     expect(tauriMocks.open).toHaveBeenCalledWith(
       expect.objectContaining({ directory: true, multiple: false }),
     );
     expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
-      "save_library_root",
+      "select_library_location",
       expect.objectContaining({ rootPath: expect.any(String) }),
     );
-    expect(screen.getByText("No music folder selected.")).toBeInTheDocument();
+    expect(screen.getByText("No library location selected")).toBeInTheDocument();
   });
 
   it("successful folder selection persists the root and scans", async () => {
@@ -2649,12 +2655,15 @@ describe("Library workspace", () => {
     render(<App />);
 
     await openLibraryWorkspace(user);
-    await screen.findByText("No music folder selected.");
-    await user.click(screen.getAllByRole("button", { name: "Choose music folder" })[0]);
+    await screen.findByText("No library location selected");
+    await user.click(screen.getByRole("button", { name: "Library location" }));
 
-    await screen.findByText("Hey Jude");
-    expect(tauriMocks.invoke).toHaveBeenCalledWith("save_library_root", { rootPath: "C:\\Music" });
-    expect(tauriMocks.invoke).toHaveBeenCalledWith("scan_media_library", { rootPath: "C:\\Music" });
+    await screen.findByRole("button", { name: /The Beatles/ });
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("select_library_location", {
+      rootPath: "C:\\Music",
+    });
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith("save_library_root", expect.anything());
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith("scan_media_library", expect.anything());
   });
 
   it("restored folder triggers one scan", async () => {
@@ -2662,13 +2671,13 @@ describe("Library workspace", () => {
     render(<App />);
 
     await waitFor(() =>
-      expect(tauriMocks.invoke).toHaveBeenCalledWith("scan_media_library", {
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("refresh_media_library", {
         rootPath: "C:\\Music",
       }),
     );
 
     const scanCalls = tauriMocks.invoke.mock.calls.filter(
-      ([command]) => command === "scan_media_library",
+      ([command]) => command === "refresh_media_library",
     );
     expect(scanCalls).toHaveLength(1);
     expect(tauriMocks.invoke).toHaveBeenCalledWith("load_library_index", {
@@ -2694,7 +2703,7 @@ describe("Library workspace", () => {
         });
       }
 
-      if (command === "scan_media_library") {
+      if (command === "refresh_media_library") {
         return pendingScan.promise;
       }
 
@@ -2708,14 +2717,15 @@ describe("Library workspace", () => {
     render(<App />);
     await openLibraryWorkspace();
 
-    expect(await screen.findByText("Cached Song")).toBeInTheDocument();
-    expect(screen.getByText("Showing saved library · checking for changes...")).toBeInTheDocument();
+    const cachedArtist = await screen.findByRole("button", { name: /Cached Artist/ });
+    expect(cachedArtist).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("Refreshing library...")).toBeInTheDocument();
 
     pendingScan.resolve(populatedScanResult);
 
-    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
-    expect(screen.queryByText("Cached Song")).not.toBeInTheDocument();
-    expect(screen.getByText("Library updated")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /The Beatles/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Cached Artist/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Library updated")).not.toBeInTheDocument();
   });
 
   it("keeps cached songs searchable while validation is running", async () => {
@@ -2745,7 +2755,7 @@ describe("Library workspace", () => {
         });
       }
 
-      if (command === "scan_media_library") {
+      if (command === "refresh_media_library") {
         return pendingScan.promise;
       }
 
@@ -2760,11 +2770,11 @@ describe("Library workspace", () => {
     await openLibraryWorkspace(user);
 
     await user.type(await screen.findByLabelText("Search library"), "cached artist");
-    expect(screen.getByText("Cached Song")).toBeInTheDocument();
-    expect(screen.getByText("Showing saved library · checking for changes...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Cached Artist/ })).toBeInTheDocument();
+    expect(screen.getByText("Refreshing library...")).toBeInTheDocument();
 
     pendingScan.resolve(populatedScanResult);
-    expect(await screen.findByText("No search results")).toBeInTheDocument();
+    expect(await screen.findByText("No songs match this search.")).toBeInTheDocument();
   });
 
   it("preserves cached songs when background validation fails", async () => {
@@ -2785,7 +2795,7 @@ describe("Library workspace", () => {
         });
       }
 
-      if (command === "scan_media_library") {
+      if (command === "refresh_media_library") {
         return pendingScan.promise;
       }
 
@@ -2798,14 +2808,14 @@ describe("Library workspace", () => {
 
     render(<App />);
     await openLibraryWorkspace();
-    await screen.findByText("Cached Song");
+    await screen.findByRole("button", { name: /Cached Artist/ });
 
     pendingScan.reject("The selected library folder is not available.");
 
     expect(
-      await screen.findByText("Library check failed · showing last known results"),
+      await screen.findByText("The selected library folder is not available."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Cached Song")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Cached Artist/ })).toBeInTheDocument();
     expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
       "save_library_index",
       expect.objectContaining({ scanResult: expect.anything() }),
@@ -2830,7 +2840,7 @@ describe("Library workspace", () => {
         });
       }
 
-      if (command === "scan_media_library") {
+      if (command === "refresh_media_library") {
         return pendingScan.promise;
       }
 
@@ -2844,11 +2854,11 @@ describe("Library workspace", () => {
     render(<App />);
     await openLibraryWorkspace();
 
-    expect(await screen.findByText("Checking library for changes...")).toBeInTheDocument();
+    expect(await screen.findByText("Refreshing library...")).toBeInTheDocument();
     expect(screen.queryByText("Cached Song")).not.toBeInTheDocument();
 
     pendingScan.resolve(populatedScanResult);
-    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /The Beatles/ })).toBeInTheDocument();
   });
 
   it("does not duplicate authoritative validation scans in StrictMode", async () => {
@@ -2869,7 +2879,7 @@ describe("Library workspace", () => {
         });
       }
 
-      if (command === "scan_media_library") {
+      if (command === "refresh_media_library") {
         return pendingScan.promise;
       }
 
@@ -2882,15 +2892,15 @@ describe("Library workspace", () => {
 
     renderStrictApp();
     await openLibraryWorkspace();
-    await screen.findByText("Cached Song");
+    await screen.findByRole("button", { name: /Cached Artist/ });
 
     const scanCalls = tauriMocks.invoke.mock.calls.filter(
-      ([command]) => command === "scan_media_library",
+      ([command]) => command === "refresh_media_library",
     );
     expect(scanCalls).toHaveLength(1);
 
     pendingScan.resolve(populatedScanResult);
-    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /The Beatles/ })).toBeInTheDocument();
   });
 
   it("renders loading state while scanning", async () => {
@@ -2906,7 +2916,7 @@ describe("Library workspace", () => {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
 
-      if (command === "scan_media_library") {
+      if (command === "refresh_media_library") {
         return pendingScan;
       }
 
@@ -2916,9 +2926,9 @@ describe("Library workspace", () => {
     render(<App />);
     await openLibraryWorkspace();
 
-    expect(await screen.findByText("Scanning for .opus and .ttml pairs...")).toBeInTheDocument();
+    expect(await screen.findByText("Refreshing library...")).toBeInTheDocument();
     resolveScan(populatedScanResult);
-    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /The Beatles/ })).toBeInTheDocument();
   });
 
   it("exits restoring and scanning after a successful restored-root scan in StrictMode", async () => {
@@ -2931,7 +2941,7 @@ describe("Library workspace", () => {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
 
-      if (command === "scan_media_library") {
+      if (command === "refresh_media_library") {
         return pendingScan.promise;
       }
 
@@ -2941,18 +2951,16 @@ describe("Library workspace", () => {
     renderStrictApp();
     await openLibraryWorkspace();
 
-    expect(await screen.findByText("Scanning for .opus and .ttml pairs...")).toBeInTheDocument();
+    expect(await screen.findByText("Refreshing library...")).toBeInTheDocument();
 
     pendingScan.resolve(populatedScanResult);
 
-    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /The Beatles/ })).toBeInTheDocument();
+    expect(screen.getByText("2 songs · 2 artists")).toBeInTheDocument();
     expect(
-      screen.getByText("Scan complete · 3 folders · 5 files · 2 songs · 1 issues"),
-    ).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.queryByText("Restoring saved library folder...")).not.toBeInTheDocument(),
-    );
-    expect(screen.queryByText("Scanning for .opus and .ttml pairs...")).not.toBeInTheDocument();
+      screen.queryByText("Scan complete · 3 folders · 5 files · 2 songs · 1 issues"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Refreshing library...")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Rescan" })).toBeEnabled();
   });
 
@@ -2961,13 +2969,18 @@ describe("Library workspace", () => {
     render(<App />);
     await openLibraryWorkspace();
 
-    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
-    expect(
-      screen.getByText("Scan complete · 3 folders · 5 files · 2 songs · 1 issues"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("The Beatles")).toBeInTheDocument();
-    expect(screen.getByText("Diagnostics (1)")).toBeInTheDocument();
+    const beatles = await screen.findByRole("button", { name: /The Beatles/ });
+    expect(screen.getByText("2 songs · 2 artists")).toBeInTheDocument();
+    expect(beatles).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(beatles);
+    expect(screen.getByText("Hey Jude")).toBeInTheDocument();
+    expect(beatles).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(beatles);
+    expect(beatles).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Hey Jude")).not.toBeInTheDocument();
+    expect(screen.queryByText("Diagnostics (1)")).not.toBeInTheDocument();
 
+    await openDeveloperWorkspace();
     await userEvent.click(screen.getByText("Diagnostics (1)"));
     expect(screen.getByText("Missing lyrics")).toBeInTheDocument();
     expect(screen.getByText("Loose\\Missing Lyrics.opus")).toBeInTheDocument();
@@ -2978,7 +2991,7 @@ describe("Library workspace", () => {
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
 
     await playSongFromLibrary(user, "Hey Jude");
 
@@ -3006,7 +3019,7 @@ describe("Library workspace", () => {
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     const { container } = render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
     const audio = getAudioElement();
 
     await user.click(screen.getByRole("button", { name: "Performance" }));
@@ -3022,7 +3035,7 @@ describe("Library workspace", () => {
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
     await playSongFromLibrary(user, "Hey Jude");
 
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
@@ -3038,7 +3051,7 @@ describe("Library workspace", () => {
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
     await playSongFromLibrary(user, "Hey Jude");
 
     const audio = getAudioElement();
@@ -3082,7 +3095,7 @@ describe("Library workspace", () => {
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
 
     await playSongFromLibrary(user, "Hey Jude");
 
@@ -3101,16 +3114,14 @@ describe("Library workspace", () => {
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
 
     await playSongFromLibrary(user, "Hey Jude");
     const audio = getAudioElement();
     fireEvent.error(audio);
     expect(screen.getByText("Playback failed.")).toBeInTheDocument();
 
-    const secondSongRow = screen.getByText("Jóga").closest("article");
-    expect(secondSongRow).not.toBeNull();
-    await user.click(within(secondSongRow as HTMLElement).getByRole("button", { name: "Play" }));
+    await playSongFromLibrary(user, "Jóga");
     expect(screen.getByRole("region", { name: "Current song information" })).toHaveTextContent(
       "Björk - Jóga",
     );
@@ -3121,7 +3132,7 @@ describe("Library workspace", () => {
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
 
     await playSongFromLibrary(user, "Hey Jude");
     await waitFor(() =>
@@ -3215,7 +3226,7 @@ describe("Library workspace", () => {
     });
     const { container } = render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
     await playSongFromLibrary(user, "Hey Jude");
     await user.click(screen.getByRole("button", { name: "Performance" }));
 
@@ -3298,7 +3309,7 @@ describe("Library workspace", () => {
     });
     const { container } = render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
     await playSongFromLibrary(user, "Hey Jude");
     await user.click(screen.getByRole("button", { name: "Performance" }));
 
@@ -3362,7 +3373,7 @@ describe("Library workspace", () => {
     });
     const { container, unmount } = render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
     await playSongFromLibrary(user, "Hey Jude");
     await user.click(screen.getByRole("button", { name: "Performance" }));
     await waitFor(() =>
@@ -3430,7 +3441,7 @@ describe("Library workspace", () => {
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     const { container } = render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
     await playSongFromLibrary(user, "Hey Jude");
     await user.click(screen.getByRole("button", { name: "Performance" }));
     await screen.findByText("Yesterday all my troubles");
@@ -3479,7 +3490,7 @@ describe("Library workspace", () => {
     });
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
     await playSongFromLibrary(user, "Hey Jude");
     await user.click(screen.getByRole("button", { name: "Performance" }));
 
@@ -3496,7 +3507,7 @@ describe("Library workspace", () => {
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
     await playSongFromLibrary(user, "Hey Jude");
     await user.click(screen.getByRole("button", { name: "Performance" }));
     await screen.findByText("Yesterday all my troubles");
@@ -3519,7 +3530,7 @@ describe("Library workspace", () => {
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
     await playSongFromLibrary(user, "Hey Jude");
     await user.click(screen.getByRole("button", { name: "Performance" }));
 
@@ -3553,7 +3564,7 @@ describe("Library workspace", () => {
     });
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
 
     await playSongFromLibrary(user, "Hey Jude");
     await user.click(screen.getByRole("button", { name: "Performance" }));
@@ -3593,7 +3604,7 @@ describe("Library workspace", () => {
     });
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
     await playSongFromLibrary(user, "Hey Jude");
     await playSongFromLibrary(user, "Jóga");
     await user.click(screen.getByRole("button", { name: "Performance" }));
@@ -3611,13 +3622,10 @@ describe("Library workspace", () => {
     render(<App />);
     await openLibraryWorkspace();
 
-    expect(await screen.findByText("No files inspected")).toBeInTheDocument();
     expect(
-      screen.getByText("The selected folder could not be scanned or contains no files."),
+      await screen.findByText("No supported karaoke songs were found in this folder."),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("Scan complete · 1 folders · 0 files · 0 songs · 0 issues"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("0 songs · 0 artists")).toBeInTheDocument();
   });
 
   it("shows a no-supported-media scan state", async () => {
@@ -3625,9 +3633,8 @@ describe("Library workspace", () => {
     render(<App />);
     await openLibraryWorkspace();
 
-    expect(await screen.findByText("No supported karaoke files found")).toBeInTheDocument();
     expect(
-      screen.getByText("The scan did not find any .opus or .ttml files in the selected folder."),
+      await screen.findByText("No supported karaoke songs were found in this folder."),
     ).toBeInTheDocument();
   });
 
@@ -3636,12 +3643,11 @@ describe("Library workspace", () => {
     render(<App />);
     await openLibraryWorkspace();
 
-    expect(await screen.findByText("No valid songs found")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        ".opus and .ttml files must have matching filename stems and be in the same folder. Open diagnostics for details.",
-      ),
+      await screen.findByText("No supported karaoke songs were found in this folder."),
     ).toBeInTheDocument();
+    expect(screen.queryByText("Missing lyrics")).not.toBeInTheDocument();
+    await openDeveloperWorkspace();
     await userEvent.click(screen.getByText("Diagnostics (1)"));
     expect(screen.getByText("Missing lyrics")).toBeInTheDocument();
   });
@@ -3654,11 +3660,13 @@ describe("Library workspace", () => {
 
     const search = await screen.findByLabelText("Search library");
     await user.type(search, "beatles");
+    await user.click(screen.getByRole("button", { name: /The Beatles/ }));
     expect(screen.getByText("Hey Jude")).toBeInTheDocument();
     expect(screen.queryByText("Jóga")).not.toBeInTheDocument();
 
     await user.clear(search);
     await user.type(search, "jóga");
+    await user.click(screen.getByRole("button", { name: /Björk/ }));
     expect(screen.getByText("Jóga")).toBeInTheDocument();
     expect(screen.queryByText("Hey Jude")).not.toBeInTheDocument();
 
@@ -3675,10 +3683,7 @@ describe("Library workspace", () => {
 
     await user.type(await screen.findByLabelText("Search library"), "nothing matches");
 
-    expect(screen.getByText("No search results")).toBeInTheDocument();
-    expect(
-      screen.getByText("Clear the search field to show the complete library."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("No songs match this search.")).toBeInTheDocument();
   });
 
   it("keeps stale successful results visible after a failed rescan", async () => {
@@ -3692,7 +3697,7 @@ describe("Library workspace", () => {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
 
-      if (command === "scan_media_library") {
+      if (command === "refresh_media_library") {
         scanCount += 1;
         if (scanCount === 1) {
           return Promise.resolve(populatedScanResult);
@@ -3706,7 +3711,8 @@ describe("Library workspace", () => {
     render(<App />);
     await openLibraryWorkspace(user);
 
-    await screen.findByText("Hey Jude");
+    const beatles = await screen.findByRole("button", { name: /The Beatles/ });
+    await user.click(beatles);
     await user.click(screen.getByRole("button", { name: "Rescan" }));
 
     expect(
@@ -3729,7 +3735,7 @@ describe("Library workspace", () => {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
 
-      if (command === "scan_media_library") {
+      if (command === "refresh_media_library") {
         return pendingScan;
       }
 
@@ -3743,111 +3749,53 @@ describe("Library workspace", () => {
     await user.click(rescan);
     await user.click(rescan);
     expect(
-      tauriMocks.invoke.mock.calls.filter(([command]) => command === "scan_media_library"),
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "refresh_media_library"),
     ).toHaveLength(1);
 
     resolveScan(populatedScanResult);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
   });
 
-  it("queues a newly selected folder while a restore scan is still running", async () => {
+  it("disables location changes while an authoritative refresh is active", async () => {
     const user = userEvent.setup();
-    let resolveInitialScan: (value: LibraryScanResult) => void = () => undefined;
-    const pendingInitialScan = new Promise<LibraryScanResult>((resolve) => {
-      resolveInitialScan = resolve;
-    });
-    tauriMocks.open.mockResolvedValue("C:\\Music");
-    tauriMocks.invoke.mockImplementation((command: string, args?: { rootPath?: string }) => {
+    const pendingRefresh = createDeferred<LibraryScanResult>();
+    tauriMocks.invoke.mockImplementation((command: string) => {
       if (command === "load_library_settings") {
-        return Promise.resolve({ libraryRoot: "C:\\OldMusic" });
-      }
-
-      if (command === "save_library_root") {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
-
       if (command === "load_library_index") {
         return Promise.resolve({ status: "miss", scanResult: null, message: null });
       }
-
-      if (command === "save_library_index") {
-        return Promise.resolve();
+      if (command === "refresh_media_library") {
+        return pendingRefresh.promise;
       }
-
-      if (command === "scan_media_library" && args?.rootPath === "C:\\OldMusic") {
-        return pendingInitialScan;
-      }
-
-      if (command === "scan_media_library" && args?.rootPath === "C:\\Music") {
-        return Promise.resolve(populatedScanResult);
-      }
-
       return mockSuccessfulLibraryInvoke(command);
     });
 
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Scanning for .opus and .ttml pairs...");
-    await user.click(screen.getByRole("button", { name: "Change folder" }));
+    await screen.findByText("Refreshing library...");
+    expect(screen.getByRole("button", { name: "Library location" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Rescan" })).toBeDisabled();
 
-    resolveInitialScan(emptyScanResult);
-
-    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
-    expect(tauriMocks.invoke).toHaveBeenCalledWith("scan_media_library", {
-      rootPath: "C:\\Music",
-    });
+    pendingRefresh.resolve(populatedScanResult);
+    expect(await screen.findByRole("button", { name: /The Beatles/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Library location" })).toBeEnabled();
   });
 
-  it("keeps a queued selected-root scan authoritative when the restore scan settles first", async () => {
+  it("does not duplicate folder selection under StrictMode", async () => {
     const user = userEvent.setup();
-    const pendingInitialScan = createDeferred<LibraryScanResult>();
-    const oldRootResult: LibraryScanResult = {
-      ...emptyScanResult,
-      rootPath: "C:\\OldMusic",
-    };
-
     tauriMocks.open.mockResolvedValue("C:\\Music");
-    tauriMocks.invoke.mockImplementation((command: string, args?: { rootPath?: string }) => {
-      if (command === "load_library_settings") {
-        return Promise.resolve({ libraryRoot: "C:\\OldMusic" });
-      }
-
-      if (command === "save_library_root") {
-        return Promise.resolve({ libraryRoot: "C:\\Music" });
-      }
-
-      if (command === "load_library_index") {
-        return Promise.resolve({ status: "miss", scanResult: null, message: null });
-      }
-
-      if (command === "save_library_index") {
-        return Promise.resolve();
-      }
-
-      if (command === "scan_media_library" && args?.rootPath === "C:\\OldMusic") {
-        return pendingInitialScan.promise;
-      }
-
-      if (command === "scan_media_library" && args?.rootPath === "C:\\Music") {
-        return Promise.resolve(populatedScanResult);
-      }
-
-      return mockSuccessfulLibraryInvoke(command);
-    });
+    mockInvokeWith({ scanResult: populatedScanResult });
 
     renderStrictApp();
     await openLibraryWorkspace(user);
-    await screen.findByText("Scanning for .opus and .ttml pairs...");
+    await user.click(screen.getByRole("button", { name: "Library location" }));
+    await screen.findByRole("button", { name: /The Beatles/ });
 
-    await user.click(screen.getByRole("button", { name: "Change folder" }));
-    pendingInitialScan.resolve(oldRootResult);
-
-    expect(await screen.findByText("Hey Jude")).toBeInTheDocument();
-    expect(screen.getByText(/Selected folder:/)).toHaveTextContent("C:\\Music");
-    expect(screen.queryByText("No files inspected")).not.toBeInTheDocument();
     expect(
-      screen.getByText("Scan complete · 3 folders · 5 files · 2 songs · 1 issues"),
-    ).toBeInTheDocument();
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "select_library_location"),
+    ).toHaveLength(1);
   });
 
   it("exits loading state after a restored-root scan failure", async () => {
@@ -3860,7 +3808,7 @@ describe("Library workspace", () => {
         return Promise.resolve({ libraryRoot: "C:\\Music" });
       }
 
-      if (command === "scan_media_library") {
+      if (command === "refresh_media_library") {
         return pendingScan.promise;
       }
 
@@ -3869,22 +3817,21 @@ describe("Library workspace", () => {
 
     renderStrictApp();
     await openLibraryWorkspace();
-    await screen.findByText("Scanning for .opus and .ttml pairs...");
+    await screen.findByText("Refreshing library...");
 
     pendingScan.reject("The selected library folder is not available.");
 
     expect(
       await screen.findByText("The selected library folder is not available."),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Restoring saved library folder...")).not.toBeInTheDocument();
-    expect(screen.queryByText("Scanning for .opus and .ttml pairs...")).not.toBeInTheDocument();
+    expect(screen.queryByText("Refreshing library...")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Rescan" })).toBeEnabled();
   });
 
-  it("rebuilds the library index with a guarded fresh scan", async () => {
+  it("rescans through one Host refresh command and exposes no manual index action", async () => {
     const user = userEvent.setup();
-    let scanCount = 0;
-    const pendingRebuildScan = createDeferred<LibraryScanResult>();
+    let refreshCount = 0;
+    const pendingRescan = createDeferred<LibraryScanResult>();
     const rebuiltResult: LibraryScanResult = {
       ...populatedScanResult,
       songs: [
@@ -3910,13 +3857,9 @@ describe("Library workspace", () => {
         return Promise.resolve({ status: "miss", scanResult: null, message: null });
       }
 
-      if (command === "scan_media_library") {
-        scanCount += 1;
-        return scanCount === 1 ? Promise.resolve(populatedScanResult) : pendingRebuildScan.promise;
-      }
-
-      if (command === "clear_library_index" || command === "save_library_index") {
-        return Promise.resolve();
+      if (command === "refresh_media_library") {
+        refreshCount += 1;
+        return refreshCount === 1 ? Promise.resolve(populatedScanResult) : pendingRescan.promise;
       }
 
       return mockSuccessfulLibraryInvoke(command);
@@ -3924,29 +3867,39 @@ describe("Library workspace", () => {
 
     render(<App />);
     await openLibraryWorkspace(user);
-    await screen.findByText("Hey Jude");
+    await screen.findByRole("button", { name: /The Beatles/ });
 
-    await user.click(screen.getByRole("button", { name: "Rebuild library index" }));
-    expect(screen.getByRole("button", { name: "Rebuild library index" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Rebuild library index" }));
+    expect(screen.queryByRole("button", { name: /index/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Rescan" }));
+    expect(screen.getByRole("button", { name: "Rescan" })).toBeDisabled();
 
-    expect(tauriMocks.invoke).toHaveBeenCalledWith("clear_library_index", {
+    expect(tauriMocks.invoke).toHaveBeenLastCalledWith("refresh_media_library", {
       rootPath: "C:\\Music",
     });
-    pendingRebuildScan.resolve(rebuiltResult);
-    expect(await screen.findByText("New Song")).toBeInTheDocument();
+    pendingRescan.resolve(rebuiltResult);
+    expect(await screen.findByRole("button", { name: /New Artist/ })).toBeInTheDocument();
     expect(
-      tauriMocks.invoke.mock.calls.filter(([command]) => command === "scan_media_library"),
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "refresh_media_library"),
     ).toHaveLength(2);
   });
 
   it("does not show queue actions in Library", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    const { container } = render(<App />);
 
     await openLibraryWorkspace(user);
 
-    expect(screen.queryByRole("button", { name: /add to queue/i })).not.toBeInTheDocument();
+    const library = container.querySelector(".library-workspace");
+    expect(library).not.toBeNull();
+    expect(
+      within(library as HTMLElement).queryByRole("button", { name: /play/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(library as HTMLElement).queryByRole("button", { name: /index/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(library as HTMLElement).queryByRole("button", { name: /add to queue/i }),
+    ).not.toBeInTheDocument();
   });
 });
 

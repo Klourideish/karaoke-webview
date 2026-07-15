@@ -12,21 +12,28 @@ import type { useMicrophoneRecovery } from "../microphones/useMicrophoneRecovery
 import type { useParticipantCommitDiagnostics } from "../session-singers/useParticipantCommitDiagnostics";
 import { usePerformanceMicrophoneReadiness } from "../microphones/usePerformanceMicrophoneReadiness";
 import { useDevelopmentPairing } from "../pairing/useDevelopmentPairing";
+import { LibraryDiagnostics } from "../media-library/LibraryDiagnostics";
+import type { useMediaLibrary } from "../media-library/useMediaLibrary";
+import type { AudioPlayer } from "../audioPlayer";
 
 export function DeveloperWorkspace({
+  audioPlayer,
   assignments,
   capture,
   channelRegistry,
   discovery,
   participantCommitDiagnostics,
+  mediaLibrary,
   recovery,
   singers,
 }: {
+  audioPlayer: AudioPlayer;
   assignments: ReturnType<typeof useMicrophoneAssignments>;
   capture: ReturnType<typeof useDiagnosticCapture>;
   channelRegistry: ReturnType<typeof useMicrophoneChannels>;
   discovery: ReturnType<typeof useLocalMicrophones>;
   participantCommitDiagnostics: ReturnType<typeof useParticipantCommitDiagnostics>;
+  mediaLibrary: ReturnType<typeof useMediaLibrary>;
   recovery: ReturnType<typeof useMicrophoneRecovery>;
   singers: Singer[];
 }) {
@@ -135,6 +142,43 @@ export function DeveloperWorkspace({
       </div>
 
       <div className="developer-diagnostics-panel">
+        <section className="developer-panel" aria-labelledby="library-diagnostics-heading">
+          <div>
+            <p className="region-label">Developer</p>
+            <h3 id="library-diagnostics-heading">Library diagnostics</h3>
+          </div>
+          <DiagnosticText>
+            <p>Location: {mediaLibrary.restoredRootPath ?? "None"}</p>
+            <p>
+              State: {mediaLibrary.isScanning ? "Refreshing" : "Idle"} / Cached projection:{" "}
+              {mediaLibrary.isShowingCachedResult ? "Yes" : "No"}
+            </p>
+            <p>
+              Files: {mediaLibrary.scanResult?.scannedFileCount ?? 0} / Supported:{" "}
+              {mediaLibrary.scanResult?.supportedFileCount ?? 0} / Accepted songs:{" "}
+              {mediaLibrary.scanResult?.songs.length ?? 0} / Rejected or incomplete:{" "}
+              {mediaLibrary.scanResult?.issues.length ?? 0}
+            </p>
+            <p>Last completed: {mediaLibrary.scanResult?.completedAt ?? "Never"}</p>
+            {mediaLibrary.statusMessage ? <p>Operation: {mediaLibrary.statusMessage}</p> : null}
+            {mediaLibrary.error ? <p>Last error: {mediaLibrary.error}</p> : null}
+          </DiagnosticText>
+          <LibraryDiagnostics issues={mediaLibrary.scanResult?.issues ?? []} />
+          {mediaLibrary.scanResult?.songs.length ? (
+            <div className="developer-library-playback" aria-label="Library playback validation">
+              {mediaLibrary.scanResult.songs.map((song) => (
+                <button
+                  className="secondary-button"
+                  key={song.id}
+                  type="button"
+                  onClick={() => void audioPlayer.loadSong(song)}
+                >
+                  Test playback: {song.title}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </section>
         <section className="developer-panel" aria-labelledby="development-pairing-heading">
           <div>
             <p className="region-label">Developer</p>

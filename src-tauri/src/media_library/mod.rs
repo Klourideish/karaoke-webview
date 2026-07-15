@@ -1,6 +1,7 @@
 pub mod models;
 mod persistence;
 mod playback;
+mod refresh;
 mod scanner;
 
 use models::{LibraryIndex, LibraryScanResult, LibrarySettings, MediaSong, ResolvedAudioSource};
@@ -12,6 +13,8 @@ use playback::resolve_audio_source_for_song;
 use scanner::{path_to_string, scan_media_library_path};
 use std::path::PathBuf;
 use tauri::Manager;
+
+pub(crate) use refresh::MediaLibraryRefreshCoordinator;
 
 #[tauri::command]
 pub fn scan_media_library(root_path: String) -> Result<LibraryScanResult, String> {
@@ -72,6 +75,52 @@ pub fn save_library_index(
 pub fn clear_library_index(app: tauri::AppHandle, root_path: String) -> Result<(), String> {
     clear_library_index_for_root(&library_index_path(&app)?, &root_path)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn select_library_location(
+    app: tauri::AppHandle,
+    root_path: String,
+    coordinator: tauri::State<'_, MediaLibraryRefreshCoordinator>,
+) -> Result<LibraryScanResult, refresh::LibraryRefreshError> {
+    coordinator.select_and_refresh(
+        &settings_path(&app).map_err(|message| {
+            refresh::LibraryRefreshError::new(
+                refresh::LibraryRefreshErrorCode::SettingsFailed,
+                message,
+            )
+        })?,
+        &library_index_path(&app).map_err(|message| {
+            refresh::LibraryRefreshError::new(
+                refresh::LibraryRefreshErrorCode::IndexFailed,
+                message,
+            )
+        })?,
+        root_path,
+    )
+}
+
+#[tauri::command]
+pub(crate) fn refresh_media_library(
+    app: tauri::AppHandle,
+    root_path: String,
+    coordinator: tauri::State<'_, MediaLibraryRefreshCoordinator>,
+) -> Result<LibraryScanResult, refresh::LibraryRefreshError> {
+    coordinator.rescan(
+        &settings_path(&app).map_err(|message| {
+            refresh::LibraryRefreshError::new(
+                refresh::LibraryRefreshErrorCode::SettingsFailed,
+                message,
+            )
+        })?,
+        &library_index_path(&app).map_err(|message| {
+            refresh::LibraryRefreshError::new(
+                refresh::LibraryRefreshErrorCode::IndexFailed,
+                message,
+            )
+        })?,
+        root_path,
+    )
 }
 
 #[tauri::command]

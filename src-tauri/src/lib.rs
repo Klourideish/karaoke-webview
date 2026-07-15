@@ -33,6 +33,7 @@ pub fn run() {
         .manage(microphones::selection::MicrophoneSelectionCoordinator::default())
         .manage(session_singers::SessionSingerRegistry::default())
         .manage(participant_commit::ParticipantCommitCoordinator::default())
+        .manage(media_library::MediaLibraryRefreshCoordinator::default())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             capture::diagnostic_capture_snapshot,
@@ -69,6 +70,7 @@ pub fn run() {
             microphones::list_microphone_waiting_states,
             lyrics::parse_song_lyrics,
             media_library::resolve_audio_source,
+            media_library::refresh_media_library,
             microphones::remove_microphone_channel,
             session_singers::remove_session_singer,
             microphones::replace_microphone_channel_source,
@@ -78,6 +80,7 @@ pub fn run() {
             session_singers::rename_session_singer,
             media_library::save_library_index,
             media_library::save_library_root,
+            media_library::select_library_location,
             media_library::scan_media_library,
             development_protocol::start_development_protocol_listener,
             development_protocol::stop_development_protocol_listener,

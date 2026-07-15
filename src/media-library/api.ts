@@ -26,6 +26,14 @@ export function scanMediaLibrary(rootPath: string): Promise<LibraryScanResult> {
   return invoke<LibraryScanResult>("scan_media_library", { rootPath });
 }
 
+export function selectLibraryLocation(rootPath: string): Promise<LibraryScanResult> {
+  return invoke<LibraryScanResult>("select_library_location", { rootPath });
+}
+
+export function refreshMediaLibrary(rootPath: string): Promise<LibraryScanResult> {
+  return invoke<LibraryScanResult>("refresh_media_library", { rootPath });
+}
+
 export async function chooseLibraryFolder(): Promise<string | null> {
   const selection = await open({
     directory: true,

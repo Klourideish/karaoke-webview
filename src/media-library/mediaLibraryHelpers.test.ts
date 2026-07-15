@@ -1,17 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { scanResultsMatch } from "./comparison";
+import { groupSongsByArtist, UNKNOWN_ARTIST } from "./libraryPresentation";
 import { filterSongs } from "./search";
-import { scanLibrary } from "./scanCoordinator";
+import { refreshLibrary } from "./scanCoordinator";
 import type { LibraryScanResult, MediaSong } from "./types";
 
 const apiMocks = vi.hoisted(() => ({
-  scanMediaLibrary: vi.fn(),
+  refreshMediaLibrary: vi.fn(),
+  selectLibraryLocation: vi.fn(),
 }));
 
 vi.mock("./api", () => ({
   loadLibraryIndex: vi.fn(),
   loadLibrarySettings: vi.fn(),
-  scanMediaLibrary: apiMocks.scanMediaLibrary,
+  refreshMediaLibrary: apiMocks.refreshMediaLibrary,
+  selectLibraryLocation: apiMocks.selectLibraryLocation,
 }));
 
 const songs: MediaSong[] = [
@@ -50,7 +53,8 @@ const scanResult: LibraryScanResult = {
 };
 
 beforeEach(() => {
-  apiMocks.scanMediaLibrary.mockReset();
+  apiMocks.refreshMediaLibrary.mockReset();
+  apiMocks.selectLibraryLocation.mockReset();
 });
 
 describe("media-library search helpers", () => {
@@ -94,34 +98,59 @@ describe("media-library comparison helpers", () => {
   });
 });
 
-describe("scan coordinator", () => {
-  it("shares a pending same-root scan", async () => {
+describe("library refresh coordinator", () => {
+  it("shares a pending same-root refresh", async () => {
     let resolveScan: (value: LibraryScanResult) => void = () => undefined;
     const pendingScan = new Promise<LibraryScanResult>((resolve) => {
       resolveScan = resolve;
     });
-    apiMocks.scanMediaLibrary.mockReturnValue(pendingScan);
+    apiMocks.refreshMediaLibrary.mockReturnValue(pendingScan);
 
-    const firstScan = scanLibrary("C:\\Music");
-    const secondScan = scanLibrary("C:\\Music");
+    const firstScan = refreshLibrary("C:\\Music");
+    const secondScan = refreshLibrary("C:\\Music");
 
     expect(secondScan).toBe(firstScan);
-    expect(apiMocks.scanMediaLibrary).toHaveBeenCalledTimes(1);
+    expect(apiMocks.refreshMediaLibrary).toHaveBeenCalledTimes(1);
 
     resolveScan(scanResult);
     await expect(firstScan).resolves.toEqual(scanResult);
   });
 
-  it("starts a fresh same-root scan when forced", async () => {
-    apiMocks.scanMediaLibrary.mockResolvedValue(scanResult);
+  it("keeps location selection distinct from a rescan", async () => {
+    apiMocks.refreshMediaLibrary.mockResolvedValue(scanResult);
+    apiMocks.selectLibraryLocation.mockResolvedValue(scanResult);
 
-    const firstScan = scanLibrary("C:\\Music");
-    const forcedScan = scanLibrary("C:\\Music", true);
+    const rescan = refreshLibrary("C:\\Music");
+    const selection = refreshLibrary("C:\\Music", true);
 
-    expect(forcedScan).not.toBe(firstScan);
-    expect(apiMocks.scanMediaLibrary).toHaveBeenCalledTimes(2);
+    expect(selection).not.toBe(rescan);
+    expect(apiMocks.refreshMediaLibrary).toHaveBeenCalledTimes(1);
+    expect(apiMocks.selectLibraryLocation).toHaveBeenCalledTimes(1);
 
-    await expect(firstScan).resolves.toEqual(scanResult);
-    await expect(forcedScan).resolves.toEqual(scanResult);
+    await expect(rescan).resolves.toEqual(scanResult);
+    await expect(selection).resolves.toEqual(scanResult);
+  });
+});
+
+describe("library artist presentation", () => {
+  it("groups artists and songs using stable case-insensitive alphabetical ordering", () => {
+    const groups = groupSongsByArtist([
+      { ...songs[0], id: "queen-b", artist: "queen", title: "Zoo" },
+      { ...songs[1], id: "adele-b", artist: "Adele", title: "taste" },
+      { ...songs[0], id: "queen-a", artist: "Queen", title: "A Kind of Magic" },
+      { ...songs[1], id: "adele-a", artist: "adele", title: "Hello" },
+    ]);
+
+    expect(groups.map((group) => group.artist.toLowerCase())).toEqual(["adele", "queen"]);
+    expect(groups[0].songs.map((song) => song.title)).toEqual(["Hello", "taste"]);
+    expect(groups[1].songs.map((song) => song.title)).toEqual(["A Kind of Magic", "Zoo"]);
+  });
+
+  it("uses the unknown artist fallback only when artist metadata is blank", () => {
+    const groups = groupSongsByArtist([{ ...songs[0], artist: "   " }]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].artist).toBe(UNKNOWN_ARTIST);
+    expect(groups[0].songs[0].id).toBe(songs[0].id);
   });
 });

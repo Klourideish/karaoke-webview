@@ -1,14 +1,11 @@
-import type { AudioPlayer } from "../audioPlayer";
-import { LibraryDiagnostics } from "../media-library/LibraryDiagnostics";
+import { useMemo } from "react";
 import { LibrarySongList } from "../media-library/LibrarySongList";
-import { scanSummary } from "../media-library/libraryFormatting";
+import { groupSongsByArtist } from "../media-library/libraryPresentation";
 import { useMediaLibrary } from "../media-library/useMediaLibrary";
 
 export function LibraryWorkspace({
-  audioPlayer,
   mediaLibrary,
 }: {
-  audioPlayer: AudioPlayer;
   mediaLibrary: ReturnType<typeof useMediaLibrary>;
 }) {
   const {
@@ -16,104 +13,90 @@ export function LibraryWorkspace({
     error,
     filteredSongs,
     isLoadingSettings,
-    isRebuildingIndex,
     isScanning,
-    rebuildIndex,
     rescan,
     restoredRootPath,
     scanResult,
     searchTerm,
     setSearchTerm,
-    statusMessage,
   } = mediaLibrary;
-
   const hasFolder = Boolean(restoredRootPath);
-  const completedScan = scanResult;
-  const songCount = completedScan?.songs.length ?? 0;
-  const isSearchActive = searchTerm.trim().length > 0;
+  const songCount = scanResult?.songs.length ?? 0;
+  const artistCount = useMemo(
+    () => groupSongsByArtist(scanResult?.songs ?? []).length,
+    [scanResult?.songs],
+  );
+  const controlsDisabled = isLoadingSettings || isScanning;
 
   return (
     <section className="library-workspace" aria-labelledby="view-heading">
       <h2 id="view-heading" className="visually-hidden">
         Library
       </h2>
-      <div className="library-header">
-        <div className="library-actions" aria-label="Library actions">
-          <button className="library-action-button" type="button" onClick={chooseFolder}>
-            {hasFolder ? "Change folder" : "Choose music folder"}
-          </button>
-          <button
-            className="library-action-button"
-            type="button"
-            onClick={rescan}
-            disabled={!hasFolder || isScanning}
-          >
-            Rescan
-          </button>
-          <button
-            className="library-action-button"
-            type="button"
-            onClick={rebuildIndex}
-            disabled={!hasFolder || isScanning || isRebuildingIndex}
-          >
-            Rebuild library index
-          </button>
-        </div>
+      <div className="library-toolbar" aria-label="Library controls">
+        <button
+          className="library-action-button"
+          type="button"
+          onClick={chooseFolder}
+          disabled={controlsDisabled}
+        >
+          Library location
+        </button>
+        <button
+          className="library-action-button"
+          type="button"
+          onClick={rescan}
+          disabled={!hasFolder || controlsDisabled}
+        >
+          Rescan
+        </button>
+        <p className="library-location" title={restoredRootPath ?? undefined}>
+          {restoredRootPath ?? "No library location selected"}
+        </p>
       </div>
 
-      <div className="library-status-panel" aria-live="polite">
-        {isLoadingSettings ? (
-          <p>Restoring saved library folder...</p>
-        ) : hasFolder ? (
-          <p>
-            Selected folder: <span>{restoredRootPath}</span>
-          </p>
-        ) : (
-          <p>No music folder selected.</p>
-        )}
-        {statusMessage ? <p>{statusMessage}</p> : null}
-        {isScanning ? <p>Scanning for .opus and .ttml pairs...</p> : null}
-        {error ? <p className="library-error">{error}</p> : null}
-        {completedScan ? <p>{scanSummary(completedScan)}</p> : null}
+      <div className="library-summary" aria-live="polite">
+        <strong>
+          {songCount} {songCount === 1 ? "song" : "songs"} · {artistCount}{" "}
+          {artistCount === 1 ? "artist" : "artists"}
+        </strong>
+        {isScanning ? <span>Refreshing library...</span> : null}
+        {error ? (
+          <span className="library-error" role="alert">
+            {error}
+          </span>
+        ) : null}
       </div>
 
       {!hasFolder && !isLoadingSettings ? (
         <div className="library-empty-state">
-          <h3>No folder selected</h3>
-          <p>
-            Choose a folder containing paired files like Artist - Song.opus and Artist - Song.ttml
-            in the same directory.
-          </p>
-          <button className="library-action-button" type="button" onClick={chooseFolder}>
-            Choose music folder
-          </button>
+          <p>Choose a library location to browse karaoke songs.</p>
         </div>
       ) : null}
 
-      {completedScan ? (
+      {scanResult ? (
         <>
-          <div className="library-search-row">
-            <label htmlFor="library-search">Search library</label>
-            <input
-              id="library-search"
-              className="library-search-input"
-              type="search"
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Search artist, title, or filename"
+          {songCount > 0 ? (
+            <div className="library-search-row">
+              <label htmlFor="library-search">Search library</label>
+              <input
+                id="library-search"
+                className="library-search-input"
+                type="search"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search artist or title"
+              />
+            </div>
+          ) : null}
+          <section className="library-artists" aria-labelledby="library-artists-heading">
+            <h3 id="library-artists-heading">Artists</h3>
+            <LibrarySongList
+              isSearchActive={searchTerm.trim().length > 0}
+              songs={filteredSongs}
+              totalSongCount={songCount}
             />
-          </div>
-
-          <LibrarySongList
-            audioPlayer={audioPlayer}
-            isSearchActive={isSearchActive}
-            rootPath={completedScan.rootPath}
-            scanResult={completedScan}
-            songs={filteredSongs}
-            totalSongCount={songCount}
-          />
-
-          <LibraryDiagnostics issues={completedScan.issues} />
+          </section>
         </>
       ) : null}
     </section>

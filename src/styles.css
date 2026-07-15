@@ -1038,24 +1038,27 @@ h3 {
 
 .library-workspace {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  gap: var(--space-5);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: var(--space-4);
   min-width: 0;
+  min-height: 0;
 }
 
-.library-header {
+.library-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-5);
-  align-items: start;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
   min-width: 0;
 }
 
-.library-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  justify-content: flex-end;
+.library-location {
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .library-action-button {
@@ -1073,22 +1076,19 @@ h3 {
   opacity: 0.62;
 }
 
-.library-status-panel {
+.library-summary {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3) var(--space-5);
-  padding: var(--space-4);
+  align-items: center;
+  gap: var(--space-2) var(--space-5);
+  min-height: 24px;
+  color: var(--muted);
 }
 
-.library-status-panel p,
 .library-empty-state p,
 .library-diagnostics p {
   margin: 0;
   color: var(--muted);
-}
-
-.library-status-panel span {
-  color: var(--text);
 }
 
 .library-error {
@@ -1121,54 +1121,81 @@ h3 {
   color: var(--text);
 }
 
-.song-list {
+.library-artists {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: var(--space-3);
   min-width: 0;
-  overflow: auto;
+  min-height: 0;
 }
 
-.song-row {
-  display: grid;
-  grid-template-columns: minmax(220px, 1.3fr) minmax(140px, 0.75fr) minmax(160px, 0.85fr) auto;
-  gap: var(--space-4);
-  align-items: center;
-  min-width: 0;
-  padding: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-2);
-}
-
-.song-load-button {
-  justify-self: end;
-  min-width: 72px;
-}
-
-.song-row-main {
-  min-width: 0;
-}
-
-.song-row h3,
-.song-row p {
+.library-artists h3 {
   margin: 0;
 }
 
-.song-row-main p,
-.song-row-detail {
-  color: var(--muted);
+.artist-groups {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
-.song-row-detail {
-  min-width: 0;
+.artist-group {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.artist-group-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 var(--space-4);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.artist-group-toggle:hover {
+  background: var(--surface-3);
+}
+
+.artist-song-count {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.artist-song-list {
+  display: grid;
+  border-top: 1px solid var(--border);
+}
+
+.artist-song-row {
+  min-height: 38px;
+  padding: var(--space-2) var(--space-4) var(--space-2) calc(var(--space-4) * 2 + 0.7rem);
+  border-bottom: 1px solid var(--border);
+}
+
+.artist-song-row:last-child {
+  border-bottom: 0;
 }
 
 .library-diagnostics {
   padding: var(--space-4);
   overflow: auto;
+}
+
+.developer-library-playback {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .library-diagnostics summary {
@@ -1445,14 +1472,9 @@ h3 {
     grid-template-columns: auto minmax(80px, 140px) auto;
   }
 
-  .library-header,
-  .song-row,
+  .library-toolbar,
   .singer-microphone-card {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .song-load-button {
-    justify-self: start;
   }
 
   .bottom-media-bar {
@@ -1462,10 +1484,6 @@ h3 {
   .seek-placeholder,
   .volume-placeholder {
     display: none;
-  }
-
-  .library-actions {
-    justify-content: flex-start;
   }
 
   .microphone-developer-link {

@@ -5,6 +5,7 @@ Phone interaction is a core product direction, not an optional add-on. Sequence 
 ## Completed Foundation
 
 - recursive media-library scanner and persistent metadata index
+- operator Library organisation with automatic refresh, alphabetical artist groups, and collapsible song browsing
 - local Opus playback through one persistent audio element
 - TTML parser and normalized lyric model
 - lyric timing and synchronized fragment presentation
@@ -63,4 +64,4 @@ Architecture direction and unresolved protocol decisions are tracked in [archite
 → UI consolidation
 → Navigation
 → Queue experience
-→ Library organisation
+→ Library queue integration after authoritative queue commands exist
