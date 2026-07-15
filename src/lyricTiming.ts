@@ -231,6 +231,7 @@ export function lyricFragmentProgress(segment: LyricSegment, timeMs: number) {
 }
 
 function containsTime(range: { beginMs: number; endMs: number }, timeMs: number) {
+  // Authored lyric intervals are half-open so adjacent lines and spans switch exactly once.
   return timeMs >= range.beginMs && timeMs < range.endMs;
 }
 

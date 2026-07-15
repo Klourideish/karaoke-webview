@@ -28,6 +28,7 @@ export type AudioPlayer = {
 
 export function useAudioPlayer(): AudioPlayer {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const currentTimeRef = useRef(0);
   const loadTokenRef = useRef(0);
   const isReplacingSourceRef = useRef(false);
   const statusRef = useRef<PlaybackStatus>("idle");
@@ -50,9 +51,15 @@ export function useAudioPlayer(): AudioPlayer {
     }
   }, []);
 
+  const updateCurrentTime = useCallback((value: number) => {
+    const nextTime = finiteMediaTime(value);
+    currentTimeRef.current = nextTime;
+    setCurrentTime(nextTime);
+  }, []);
+
   const getCurrentTime = useCallback(() => {
-    return finiteMediaTime(audioRef.current?.currentTime ?? currentTime);
-  }, [currentTime]);
+    return finiteMediaTime(audioRef.current?.currentTime ?? currentTimeRef.current);
+  }, []);
 
   const play = useCallback(async () => {
     const audio = audioRef.current;
@@ -75,16 +82,19 @@ export function useAudioPlayer(): AudioPlayer {
     audioRef.current?.pause();
   }, []);
 
-  const seek = useCallback((time: number) => {
-    const audio = audioRef.current;
-    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) {
-      return;
-    }
+  const seek = useCallback(
+    (time: number) => {
+      const audio = audioRef.current;
+      if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) {
+        return;
+      }
 
-    const nextTime = clamp(time, 0, audio.duration);
-    audio.currentTime = nextTime;
-    setCurrentTime(nextTime);
-  }, []);
+      const nextTime = clamp(time, 0, audio.duration);
+      audio.currentTime = nextTime;
+      updateCurrentTime(nextTime);
+    },
+    [updateCurrentTime],
+  );
 
   const loadSong = useCallback(
     async (song: MediaSong) => {
@@ -94,7 +104,7 @@ export function useAudioPlayer(): AudioPlayer {
 
       setCurrentSong(song);
       setStatus("loading");
-      setCurrentTime(0);
+      updateCurrentTime(0);
       setDuration(0);
       setError(null);
 
@@ -148,7 +158,7 @@ export function useAudioPlayer(): AudioPlayer {
         setError(errorToMessage(resolveError, "Could not access this audio file."));
       }
     },
-    [volume],
+    [updateCurrentTime, volume],
   );
 
   const audioElement = (
@@ -164,7 +174,7 @@ export function useAudioPlayer(): AudioPlayer {
         setDuration(finiteMediaTime(event.currentTarget.duration));
       }}
       onEnded={() => {
-        setCurrentTime(finiteMediaTime(audioRef.current?.duration ?? 0));
+        updateCurrentTime(audioRef.current?.duration ?? 0);
         setStatus("ended");
       }}
       onError={(event) => {
@@ -175,7 +185,7 @@ export function useAudioPlayer(): AudioPlayer {
       }}
       onLoadedMetadata={(event) => {
         setDuration(finiteMediaTime(event.currentTarget.duration));
-        setCurrentTime(finiteMediaTime(event.currentTarget.currentTime));
+        updateCurrentTime(event.currentTarget.currentTime);
       }}
       onLoadStart={() => {
         setStatus("loading");
@@ -196,13 +206,13 @@ export function useAudioPlayer(): AudioPlayer {
         setError(null);
       }}
       onSeeked={(event) => {
-        setCurrentTime(finiteMediaTime(event.currentTarget.currentTime));
+        updateCurrentTime(event.currentTarget.currentTime);
       }}
       onSeeking={(event) => {
-        setCurrentTime(finiteMediaTime(event.currentTarget.currentTime));
+        updateCurrentTime(event.currentTarget.currentTime);
       }}
       onTimeUpdate={(event) => {
-        setCurrentTime(finiteMediaTime(event.currentTarget.currentTime));
+        updateCurrentTime(event.currentTarget.currentTime);
       }}
       preload="metadata"
       ref={audioRef}

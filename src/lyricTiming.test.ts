@@ -162,6 +162,34 @@ describe("LyricTimingEngine", () => {
     expect(engine.lookup(1_500).activeFragmentIds).toEqual(["segment-b"]);
   });
 
+  it("uses half-open line boundaries and ignores zero-duration lines", () => {
+    const engine = new LyricTimingEngine({
+      ...lyricDocument,
+      lines: [lyricDocument.lines[0]],
+    });
+    const zeroDurationEngine = new LyricTimingEngine({
+      ...lyricDocument,
+      lines: [
+        {
+          ...lyricDocument.lines[0],
+          id: "zero-duration",
+          beginMs: 2_000,
+          endMs: 2_000,
+          text: "Never active",
+          segments: [],
+        },
+      ],
+    });
+
+    expect(engine.lookup(999).timelineState).toBe("before-first-line");
+    expect(engine.lookup(1_000).currentLine?.id).toBe("line-a");
+    expect(engine.lookup(1_999).currentLine?.id).toBe("line-a");
+    expect(engine.lookup(2_000).currentLine).toBeNull();
+    expect(engine.lookup(2_000).previousLine?.id).toBe("line-a");
+    expect(zeroDurationEngine.lookup(2_000).currentLine).toBeNull();
+    expect(zeroDurationEngine.lookup(2_000).activeFragmentIds).toEqual([]);
+  });
+
   it("updates active fragments after seeking forward and backward", () => {
     const engine = new LyricTimingEngine(lyricDocument);
 

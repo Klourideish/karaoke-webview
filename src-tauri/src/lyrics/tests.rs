@@ -88,6 +88,84 @@ fn preserves_timed_fragment_text_and_spacing() {
 }
 
 #[test]
+fn preserves_meaningful_whitespace_only_nodes_between_inline_spans() {
+    let document = parse_ttml(
+        "song-a",
+        &fixture(
+            r#"<p begin="1s" end="2s"><span begin="1s" end="1.5s">A</span> <span begin="1.5s" end="2s">B</span></p>"#,
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(document.lines[0].text, "A B");
+    assert_eq!(
+        document.lines[0]
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>(),
+        ["A", " ", "B"]
+    );
+}
+
+#[test]
+fn compact_and_pretty_printed_inline_spacing_render_identically() {
+    let compact = parse_ttml(
+        "song-a",
+        &fixture(r#"<p begin="1s" end="2s"><span>A</span> <span>B</span></p>"#),
+    )
+    .unwrap();
+    let pretty = parse_ttml(
+        "song-a",
+        &fixture(
+            r#"
+            <p begin="1s" end="2s">
+              <span>A</span> <span>B</span>
+            </p>
+            "#,
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(compact.lines[0].text, "A B");
+    assert_eq!(pretty.lines[0].text, compact.lines[0].text);
+}
+
+#[test]
+fn normalizes_inline_runs_without_duplicating_existing_fragment_spacing() {
+    let document = parse_ttml(
+        "song-a",
+        &fixture(
+            r#"<p begin="1s" end="2s"><span>A </span>   <span>B</span><span>,</span> <span>C</span></p>"#,
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(document.lines[0].text, "A B, C");
+    assert_eq!(
+        document.lines[0]
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>(),
+        ["A ", "B", ",", " ", "C"]
+    );
+}
+
+#[test]
+fn preserves_nested_and_non_breaking_inline_separators() {
+    let document = parse_ttml(
+        "song-a",
+        &fixture(
+            r#"<p begin="1s" end="2s"><span><span>안녕</span> <span>world</span></span><span>&#160;</span><span>again</span></p>"#,
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(document.lines[0].text, "안녕 world\u{00a0}again");
+}
+
+#[test]
 fn nested_timed_wrapper_with_timed_children_uses_leaf_fragments() {
     let document = parse_ttml(
         "song-a",

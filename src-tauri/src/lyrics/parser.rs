@@ -154,8 +154,7 @@ fn parse_segments(
     for child in line.children() {
         if child.is_text() {
             if let Some(value) = child.text() {
-                if !value.trim().is_empty() {
-                    let text = normalize_source_text_node(value);
+                if let Some(text) = normalized_segment_text(value) {
                     push_segment(
                         &mut segments,
                         source_song_id,
@@ -183,6 +182,7 @@ fn parse_segments(
         }
     }
 
+    normalize_inline_separators(&mut segments);
     segments
 }
 
@@ -231,10 +231,9 @@ fn parse_span_segment(
         return;
     }
 
-    let text = collect_fragment_text(span);
-    if text.trim().is_empty() {
+    let Some(text) = normalized_segment_text(&collect_fragment_text(span)) else {
         return;
-    }
+    };
 
     push_segment(
         segments,
@@ -260,10 +259,10 @@ fn parse_span_children(
     for child in span.children() {
         if child.is_text() {
             if let Some(value) = child.text() {
-                if value.trim().is_empty() {
+                let Some(text) = normalized_segment_text(value) else {
                     continue;
-                }
-                if parent_has_explicit_timing {
+                };
+                if parent_has_explicit_timing && !text.chars().all(char::is_whitespace) {
                     warnings.push(warning(
                         "mixed-timed-wrapper-text",
                         "A timed lyric wrapper contains direct text around timed fragments.",
@@ -274,7 +273,7 @@ fn parse_span_children(
                     segments,
                     source_song_id,
                     line_index,
-                    normalize_source_text_node(value),
+                    text,
                     parent_begin,
                     parent_end,
                     style_refs(span),
@@ -426,6 +425,54 @@ fn normalize_source_text_node(text: &str) -> String {
         normalize_text(text)
     } else {
         text.to_string()
+    }
+}
+
+fn normalized_segment_text(text: &str) -> Option<String> {
+    if text.is_empty() {
+        return None;
+    }
+
+    if text.chars().all(char::is_whitespace) {
+        if text.contains('\n') || text.contains('\r') {
+            return None;
+        }
+        return Some(if text.contains('\u{00a0}') {
+            "\u{00a0}".to_string()
+        } else {
+            " ".to_string()
+        });
+    }
+
+    let normalized = normalize_source_text_node(text);
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn normalize_inline_separators(segments: &mut Vec<LyricSegment>) {
+    let mut index = 0;
+    while index < segments.len() {
+        if !segments[index].text.chars().all(char::is_whitespace) {
+            index += 1;
+            continue;
+        }
+
+        let keep = index > 0
+            && index + 1 < segments.len()
+            && !segments[index - 1]
+                .text
+                .chars()
+                .last()
+                .is_some_and(char::is_whitespace)
+            && !segments[index + 1]
+                .text
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace);
+        if keep {
+            index += 1;
+        } else {
+            segments.remove(index);
+        }
     }
 }
 

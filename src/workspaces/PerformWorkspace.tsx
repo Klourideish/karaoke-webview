@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import type { AudioPlayer } from "../audioPlayer";
+import { effectiveLyricTimeMs } from "../lyricOffset";
 import { presentationLineProgress, type LyricPresentationRow } from "../lyricPresentation";
 import { lyricFragmentProgress } from "../lyricTiming";
 import type { LyricLine, LyricSegment } from "../lyrics";
@@ -9,17 +10,22 @@ import type { SongLyricsState } from "../useSongLyrics";
 
 export function PerformWorkspace({
   audioPlayer,
+  lyricOffsetMs,
   lyrics,
 }: {
   audioPlayer: AudioPlayer;
+  lyricOffsetMs: number;
   lyrics: SongLyricsState;
 }) {
   const currentSong = audioPlayer.currentSong;
   const lyricSnapshot = useLyricPlaybackClock({
     audioPlayer,
     document: lyrics.document,
+    offsetMs: lyricOffsetMs,
   });
-  const currentTimeMs = lyricSnapshot?.sampledTimeMs ?? audioPlayer.currentTime * 1_000;
+  const playbackTimeMs = lyricSnapshot?.playbackTimeMs ?? audioPlayer.currentTime * 1_000;
+  const currentTimeMs =
+    lyricSnapshot?.effectiveTimeMs ?? effectiveLyricTimeMs(playbackTimeMs, lyricOffsetMs);
   const lyricState = lyricSnapshot?.state ?? null;
   const presentationRows = lyricSnapshot?.presentationRows ?? [];
   const currentRow = presentationRows.find((row) => row.role === "current") ?? null;
@@ -44,6 +50,9 @@ export function PerformWorkspace({
               <div
                 className="lyric-line-stack"
                 aria-label="Synchronized lyrics"
+                data-effective-time-ms={currentTimeMs.toFixed(0)}
+                data-lyric-offset-ms={lyricOffsetMs}
+                data-playback-time-ms={playbackTimeMs.toFixed(0)}
                 data-progress={
                   currentRow
                     ? presentationLineProgress(currentRow.line, currentTimeMs).toFixed(3)

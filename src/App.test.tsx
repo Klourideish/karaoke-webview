@@ -939,6 +939,31 @@ describe("App shell", () => {
     await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("load_library_settings"));
   });
 
+  it("provides bounded accessible session-local lyric offset controls", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const earlier = screen.getByRole("button", {
+      name: "Show lyrics 100 milliseconds earlier",
+    });
+    const later = screen.getByRole("button", {
+      name: "Show lyrics 100 milliseconds later",
+    });
+    const reset = screen.getByRole("button", { name: "Reset lyric offset" });
+    expect(screen.getByRole("status", { name: "Current lyric offset" })).toHaveTextContent("0 ms");
+    expect(reset).toBeDisabled();
+
+    for (let step = 0; step < 30; step += 1) fireEvent.click(earlier);
+    expect(screen.getByRole("status", { name: "Current lyric offset" })).toHaveTextContent(
+      "-3000 ms",
+    );
+    expect(earlier).toBeDisabled();
+    expect(later).toBeEnabled();
+
+    await user.click(reset);
+    expect(screen.getByRole("status", { name: "Current lyric offset" })).toHaveTextContent("0 ms");
+  });
+
   it("renders readable horizontal navigation labels", async () => {
     const { container } = render(<App />);
     const navigation = screen.getByRole("navigation", { name: "Primary sections" });
@@ -1030,7 +1055,9 @@ describe("App shell", () => {
     render(<App />);
 
     const topBar = screen.getByRole("banner", { name: "Application overview" });
-    expect(within(topBar).queryByRole("button")).not.toBeInTheDocument();
+    expect(
+      within(topBar).queryByRole("button", { name: /^(Play|Pause)$/ }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
     await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("load_library_settings"));
   });
@@ -3204,10 +3231,13 @@ describe("Library workspace", () => {
     expect(secondBeforePromotion).toHaveAttribute("data-presentation-role", "upcoming");
     expect(secondBeforePromotion).toHaveClass("lyric-line-row", "lyric-line-upcoming");
 
-    setAudioNumberProperty(audio, "currentTime", 2.5);
-    fireEvent.timeUpdate(audio);
+    await user.click(screen.getByRole("button", { name: "Show lyrics 100 milliseconds earlier" }));
 
-    const rows = Array.from(container.querySelectorAll(".lyric-line-row"));
+    const rows = await waitFor(() => {
+      const nextRows = Array.from(container.querySelectorAll(".lyric-line-row"));
+      expect(nextRows).toHaveLength(3);
+      return nextRows;
+    });
     expect(rows).toHaveLength(3);
     expect(rows.map((row) => row.getAttribute("data-presentation-role"))).toEqual([
       "previous",
@@ -3226,6 +3256,88 @@ describe("Library workspace", () => {
     expect(rows[0]).toHaveAttribute("aria-hidden", "true");
     expect(rows[2]).toHaveAttribute("aria-hidden", "true");
     expect(rows[1]).not.toHaveAttribute("aria-hidden");
+    expect(container.querySelector(".lyric-line-stack")).toHaveAttribute(
+      "data-playback-time-ms",
+      "2400",
+    );
+    expect(container.querySelector(".lyric-line-stack")).toHaveAttribute(
+      "data-lyric-offset-ms",
+      "-100",
+    );
+    expect(container.querySelector(".lyric-line-stack")).toHaveAttribute(
+      "data-effective-time-ms",
+      "2500",
+    );
+  });
+
+  it("applies offset immediately and retains it across workspace navigation", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    const { container } = render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByRole("button", { name: /The Beatles/ });
+    await playSongFromLibrary(user, "Hey Jude");
+    await user.click(screen.getByRole("button", { name: "Performance" }));
+
+    const audio = getAudioElement();
+    setAudioNumberProperty(audio, "currentTime", 1.2);
+    fireEvent.timeUpdate(audio);
+    expect(
+      (await screen.findByText("Yesterday all my troubles")).closest(".lyric-line-row"),
+    ).toHaveAttribute("data-presentation-lifecycle", "active");
+
+    const later = screen.getByRole("button", {
+      name: "Show lyrics 100 milliseconds later",
+    });
+    for (let step = 0; step < 5; step += 1) fireEvent.click(later);
+    await waitFor(() =>
+      expect(container.querySelector(".lyric-line-stack")).toHaveAttribute(
+        "data-effective-time-ms",
+        "700",
+      ),
+    );
+    expect(
+      screen.getByText("Yesterday all my troubles").closest(".lyric-line-row"),
+    ).toHaveAttribute("data-presentation-lifecycle", "entering");
+    expect(screen.getByRole("status", { name: "Current lyric offset" })).toHaveTextContent(
+      "+500 ms",
+    );
+
+    setAudioNumberProperty(audio, "currentTime", 4.2);
+    fireEvent.seeking(audio);
+    await waitFor(() =>
+      expect(container.querySelector(".lyric-line-stack")).toHaveAttribute(
+        "data-effective-time-ms",
+        "3700",
+      ),
+    );
+
+    setAudioNumberProperty(audio, "currentTime", 1.2);
+    fireEvent.seeking(audio);
+    fireEvent.pause(audio);
+    await waitFor(() =>
+      expect(container.querySelector(".lyric-line-stack")).toHaveAttribute(
+        "data-effective-time-ms",
+        "700",
+      ),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    await user.click(screen.getByRole("button", { name: "Performance" }));
+    expect(screen.getByRole("status", { name: "Current lyric offset" })).toHaveTextContent(
+      "+500 ms",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Reset lyric offset" }));
+    await waitFor(() =>
+      expect(container.querySelector(".lyric-line-stack")).toHaveAttribute(
+        "data-effective-time-ms",
+        "1200",
+      ),
+    );
+    expect(
+      screen.getByText("Yesterday all my troubles").closest(".lyric-line-row"),
+    ).toHaveAttribute("data-presentation-lifecycle", "active");
   });
 
   it("renders current lyric fragments in source order with static fragment states", async () => {
@@ -3467,7 +3579,12 @@ describe("Library workspace", () => {
     const audio = getAudioElement();
     fireEvent.play(audio);
 
+    await waitFor(() => expect(animationFrameCallbacks.size).toBe(1));
+    const scheduledFrameId = Array.from(animationFrameCallbacks.keys())[0];
+
     setAudioNumberProperty(audio, "currentTime", 1.02);
+    fireEvent.timeUpdate(audio);
+    expect(Array.from(animationFrameCallbacks.keys())).toEqual([scheduledFrameId]);
     runAnimationFrame();
     await waitFor(() =>
       expect(container.querySelector('[data-fragment-id="rapid-a"]')).toHaveAttribute(

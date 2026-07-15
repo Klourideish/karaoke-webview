@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { AudioPlayer } from "./audioPlayer";
+import { effectiveLyricTimeMs } from "./lyricOffset";
 import { LyricTimingEngine, type ActiveLyricState } from "./lyricTiming";
 import type { LyricDocument } from "./lyrics";
 import {
@@ -9,7 +10,9 @@ import {
 } from "./lyricPresentation";
 
 export type LyricPlaybackSnapshot = {
-  sampledTimeMs: number;
+  playbackTimeMs: number;
+  effectiveTimeMs: number;
+  offsetMs: number;
   state: ActiveLyricState;
   presentationRows: LyricPresentationRow[];
 };
@@ -17,9 +20,11 @@ export type LyricPlaybackSnapshot = {
 export function useLyricPlaybackClock({
   audioPlayer,
   document: lyricDocument,
+  offsetMs,
 }: {
   audioPlayer: AudioPlayer;
   document: LyricDocument | null;
+  offsetMs: number;
 }) {
   const timingEngine = useMemo(() => {
     return lyricDocument ? new LyricTimingEngine(lyricDocument) : null;
@@ -42,6 +47,7 @@ export function useLyricPlaybackClock({
       timingEngine,
       presentationModel,
       audioPlayer.getCurrentTime,
+      offsetMs,
       setSnapshot,
       signatureRef,
     );
@@ -49,6 +55,7 @@ export function useLyricPlaybackClock({
     audioPlayer.currentSong?.id,
     audioPlayer.currentTime,
     audioPlayer.getCurrentTime,
+    offsetMs,
     presentationModel,
     timingEngine,
   ]);
@@ -81,6 +88,7 @@ export function useLyricPlaybackClock({
         timingEngine,
         presentationModel,
         audioPlayer.getCurrentTime,
+        offsetMs,
         setSnapshot,
         signatureRef,
       );
@@ -101,6 +109,7 @@ export function useLyricPlaybackClock({
         timingEngine,
         presentationModel,
         audioPlayer.getCurrentTime,
+        offsetMs,
         setSnapshot,
         signatureRef,
       );
@@ -116,7 +125,7 @@ export function useLyricPlaybackClock({
       stopFrame();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [audioPlayer.getCurrentTime, audioPlayer.status, presentationModel, timingEngine]);
+  }, [audioPlayer.getCurrentTime, audioPlayer.status, offsetMs, presentationModel, timingEngine]);
 
   return snapshot;
 }
@@ -125,14 +134,16 @@ function publishSnapshot(
   timingEngine: LyricTimingEngine,
   presentationModel: LyricPresentationModel,
   getCurrentTime: () => number,
+  offsetMs: number,
   setSnapshot: (
     updater: (current: LyricPlaybackSnapshot | null) => LyricPlaybackSnapshot | null,
   ) => void,
   signatureRef: MutableRefObject<string | null>,
 ) {
-  const sampledTimeMs = getCurrentTime() * 1_000;
-  const state = timingEngine.lookup(sampledTimeMs);
-  const presentationRows = presentationModel.lookup(sampledTimeMs, state.timelineState);
+  const playbackTimeMs = getCurrentTime() * 1_000;
+  const effectiveTimeMs = effectiveLyricTimeMs(playbackTimeMs, offsetMs);
+  const state = timingEngine.lookup(effectiveTimeMs);
+  const presentationRows = presentationModel.lookup(effectiveTimeMs, state.timelineState);
   const signature = lyricStateSignature(state, presentationRows);
   if (signatureRef.current === signature && state.activeFragmentIds.length === 0) {
     return;
@@ -140,7 +151,9 @@ function publishSnapshot(
 
   signatureRef.current = signature;
   setSnapshot(() => ({
-    sampledTimeMs,
+    playbackTimeMs,
+    effectiveTimeMs,
+    offsetMs,
     state,
     presentationRows,
   }));

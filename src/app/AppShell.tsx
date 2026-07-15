@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AudioPlayer } from "../audioPlayer";
+import { adjustLyricOffsetMs } from "../lyricOffset";
 import { useMediaLibrary } from "../media-library/useMediaLibrary";
 import { useDiagnosticCapture } from "../microphones/useDiagnosticCapture";
 import { useLocalMicrophones } from "../microphones/useLocalMicrophones";
@@ -56,6 +57,7 @@ export function AppShell({
   singers: Singer[];
 }) {
   const [syncOpen, setSyncOpen] = useState(false);
+  const [lyricOffsetMs, setLyricOffsetMs] = useState(0);
   const lyrics = useSongLyrics(audioPlayer.currentSong);
   const microphones = useLocalMicrophones();
   const microphoneAssignments = useMicrophoneAssignments(singers);
@@ -104,7 +106,14 @@ export function AppShell({
 
   return (
     <div className="app-shell">
-      <TopInfoBar audioPlayer={audioPlayer} />
+      <TopInfoBar
+        audioPlayer={audioPlayer}
+        lyricOffsetMs={lyricOffsetMs}
+        onAdjustLyricOffset={(deltaMs) => {
+          setLyricOffsetMs((current) => adjustLyricOffsetMs(current, deltaMs));
+        }}
+        onResetLyricOffset={() => setLyricOffsetMs(0)}
+      />
 
       <div className="session-layout">
         <div className="nav-spacer" aria-hidden="true" />
@@ -130,6 +139,7 @@ export function AppShell({
             microphoneRecovery={microphoneRecovery}
             diagnosticCapture={diagnosticCapture}
             participantCommitDiagnostics={participantCommitDiagnostics}
+            lyricOffsetMs={lyricOffsetMs}
             onSelectTab={onSelectTab}
             singers={singers}
             view={activeView}
@@ -171,6 +181,7 @@ function MainContent({
   microphoneRecovery,
   diagnosticCapture,
   participantCommitDiagnostics,
+  lyricOffsetMs,
   onSelectTab,
   singers,
   view,
@@ -184,12 +195,15 @@ function MainContent({
   microphoneRecovery: ReturnType<typeof useMicrophoneRecovery>;
   diagnosticCapture: ReturnType<typeof useDiagnosticCapture>;
   participantCommitDiagnostics: ReturnType<typeof useParticipantCommitDiagnostics>;
+  lyricOffsetMs: number;
   onSelectTab: (tab: AppTab) => void;
   singers: Singer[];
   view: TabDefinition;
 }) {
   if (view.id === "performance") {
-    return <PerformWorkspace audioPlayer={audioPlayer} lyrics={lyrics} />;
+    return (
+      <PerformWorkspace audioPlayer={audioPlayer} lyricOffsetMs={lyricOffsetMs} lyrics={lyrics} />
+    );
   }
 
   if (view.id === "library") {

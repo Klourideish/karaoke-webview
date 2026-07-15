@@ -160,21 +160,55 @@ h3 {
   line-height: 1.45;
 }
 
-.offset-placeholder {
+.offset-controls {
   display: grid;
-  grid-template-columns: 32px minmax(48px, 1fr) 32px;
+  grid-template-columns: 32px minmax(64px, 1fr) 32px auto;
   gap: var(--space-2);
   align-items: center;
   color: var(--muted);
 }
 
-.offset-placeholder span {
+.offset-controls button,
+.offset-controls output {
   display: grid;
   min-height: 32px;
   place-items: center;
   border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--surface-3);
+}
+
+.offset-controls button {
+  min-width: 32px;
+  padding: 0;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.offset-controls button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.offset-controls button:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.offset-controls button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.offset-controls output {
+  padding: 0 var(--space-2);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.offset-controls .offset-reset-button {
+  padding: 0 var(--space-2);
 }
 
 .session-layout {
