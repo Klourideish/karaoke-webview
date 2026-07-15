@@ -27,23 +27,25 @@ export function SingerBar({
   const readinessBySinger = new Map(readiness.map((item) => [item.singerId, item]));
 
   return (
-    <section className="singer-bar" aria-label="Singer bar">
+    <section className="singer-bar" aria-label="Singer bar" data-empty={singers.length === 0}>
       <div className="singer-bar-heading">
         <p className="region-label">Singers</p>
       </div>
 
-      <div className="singer-list" aria-label="Singer list">
-        {singers.map((singer) => (
-          <SingerItem
-            key={singer.id}
-            readiness={readinessBySinger.get(singer.id)}
-            singer={singer}
-            onRemoveSinger={onRemoveSinger}
-            onRenameSinger={onRenameSinger}
-            pending={pendingMutation === singer.id}
-          />
-        ))}
-      </div>
+      {singers.length > 0 ? (
+        <div className="singer-list" aria-label="Singer list">
+          {singers.map((singer) => (
+            <SingerItem
+              key={singer.id}
+              readiness={readinessBySinger.get(singer.id)}
+              singer={singer}
+              onRemoveSinger={onRemoveSinger}
+              onRenameSinger={onRenameSinger}
+              pending={pendingMutation === singer.id}
+            />
+          ))}
+        </div>
+      ) : null}
 
       <div className="singer-bar-actions">
         {error ? (

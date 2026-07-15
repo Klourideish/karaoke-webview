@@ -21,6 +21,7 @@ export function App() {
       onCreateSingerWithMicrophone={sessionSingers.createWithMicrophone}
       onRemoveSinger={sessionSingers.remove}
       onRenameSinger={sessionSingers.rename}
+      onRefreshSingers={sessionSingers.refresh}
       onSelectTab={setActiveTab}
       singerError={sessionSingers.error}
       singerMutationPending={sessionSingers.pendingSingerId}

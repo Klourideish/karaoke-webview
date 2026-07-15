@@ -1,4 +1,5 @@
 mod capture;
+mod development_pairing;
 mod development_protocol;
 mod lyrics;
 mod media_library;
@@ -8,12 +9,18 @@ mod session_singers;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let development_protocol =
-        std::sync::Arc::new(development_protocol::DevelopmentProtocolManager::new());
+    let development_pairing =
+        std::sync::Arc::new(development_pairing::DevelopmentPairingCoordinator::default());
+    let development_protocol = std::sync::Arc::new(
+        development_protocol::DevelopmentProtocolManager::with_pairing(std::sync::Arc::clone(
+            &development_pairing,
+        )),
+    );
     let diagnostic_monitor =
         std::sync::Arc::new(capture::monitor::DiagnosticAudioMonitorManager::new());
     tauri::Builder::default()
         .manage(std::sync::Arc::clone(&development_protocol))
+        .manage(development_pairing)
         .manage(std::sync::Arc::clone(&diagnostic_monitor))
         .manage(capture::DiagnosticCaptureManager::with_development(
             development_protocol,
@@ -24,7 +31,7 @@ pub fn run() {
         .manage(microphones::MicrophoneRecoveryRegistry::default())
         .manage(microphones::MicrophoneRegistryOperations::default())
         .manage(microphones::selection::MicrophoneSelectionCoordinator::default())
-        .manage(session_singers::SessionSingerRegistry::with_initial_singers(4))
+        .manage(session_singers::SessionSingerRegistry::default())
         .manage(participant_commit::ParticipantCommitCoordinator::default())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -40,6 +47,8 @@ pub fn run() {
             participant_commit::get_participant_commit_diagnostics,
             development_protocol::get_development_protocol_status,
             development_protocol::get_development_stream_diagnostics,
+            development_pairing::get_development_pairing_status,
+            development_pairing::get_development_pairing_diagnostics,
             microphones::assign_microphone_channel,
             microphones::auto_assign_microphone_channel,
             microphones::clear_microphone_waiting_state,
@@ -72,6 +81,10 @@ pub fn run() {
             media_library::scan_media_library,
             development_protocol::start_development_protocol_listener,
             development_protocol::stop_development_protocol_listener,
+            development_pairing::create_development_pairing_offer,
+            development_pairing::cancel_development_pairing_offer,
+            development_pairing::accept_development_pairing_proposal,
+            development_pairing::reject_development_pairing_proposal,
             microphones::unassign_microphone_channel
         ])
         .run(tauri::generate_context!())

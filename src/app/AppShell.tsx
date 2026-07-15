@@ -32,6 +32,7 @@ export function AppShell({
   onCreateSingerWithMicrophone,
   onRemoveSinger,
   onRenameSinger,
+  onRefreshSingers,
   onSelectTab,
   singerError,
   singerMutationPending,
@@ -48,6 +49,7 @@ export function AppShell({
   ) => Promise<ParticipantCommitProjection>;
   onRemoveSinger: (id: string) => Promise<boolean>;
   onRenameSinger: (id: string, displayName: string) => Promise<unknown>;
+  onRefreshSingers: () => Promise<unknown>;
   onSelectTab: (tab: AppTab) => void;
   singerError: string | null;
   singerMutationPending: string | null;
@@ -144,6 +146,15 @@ export function AppShell({
           onClose={() => setSyncOpen(false)}
           onCommit={commitPhysicalParticipant}
           onSuccess={() => setSyncOpen(false)}
+          onPhoneAccepted={async () => {
+            await onRefreshSingers();
+            await Promise.all([
+              microphoneAssignments.refresh(),
+              microphoneChannels.refresh(),
+              microphoneRecovery.refresh(),
+              microphones.refresh(),
+            ]);
+          }}
         />
       ) : null}
     </div>

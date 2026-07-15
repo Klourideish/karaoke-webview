@@ -150,8 +150,9 @@ Dots should remain restrained, accessible, and derived from Host microphone proj
 
 The singer bar provides one restrained Sync action. Its first implemented path guides the operator
 through physical microphone selection, singer naming, and confirmation. Selection and navigation do
-not mutate Host state; final confirmation invokes one atomic Host participant commit. Phone pairing
-is visible as the next planned path but remains disabled until P5-002.
+not mutate Host state; final confirmation invokes one atomic Host participant commit. The development
+phone path displays a short-lived QR offer, waits for the phone's participant proposal, and requires
+an explicit operator Accept or Reject decision before the Host commits participant state.
 
 The Sync flow is intentionally compact:
 
@@ -159,6 +160,10 @@ The Sync flow is intentionally compact:
 2. choose an eligible local microphone;
 3. enter the singer name;
 4. confirm singer and microphone together.
+
+Development phone pairing is deliberately labelled insecure. Its QR payload contains only the
+short-lived connection offer, and the dialog shows accepted participant state only after the Host
+coordinator has validated and committed the proposal.
 
 Developer contains a read-only participant onboarding verification panel so manual testing can
 confirm the atomic result or safe failure without exposing registry internals in normal UI.

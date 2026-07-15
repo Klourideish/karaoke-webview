@@ -39,11 +39,43 @@ pub(crate) fn remove_session_singer(
     registry: tauri::State<'_, SessionSingerRegistry>,
     assignments: tauri::State<'_, crate::microphones::MicrophoneAssignmentRegistry>,
     operations: tauri::State<'_, crate::microphones::MicrophoneRegistryOperations>,
+    pairing: tauri::State<
+        '_,
+        std::sync::Arc<crate::development_pairing::DevelopmentPairingCoordinator>,
+    >,
+    development: tauri::State<
+        '_,
+        std::sync::Arc<crate::development_protocol::DevelopmentProtocolManager>,
+    >,
 ) -> Result<SessionSingerProjection, SessionSingerError> {
-    let _operation = operations.lock();
-    let in_use = assignments.assignment_for_singer(&singer_id).is_some()
-        || assignments.waiting_for_singer(&singer_id).is_some();
-    let removed = registry.remove(&singer_id, in_use)?;
-    assignments.clear_unassigned_singer_metadata(&singer_id);
+    remove_session_singer_owned(
+        &singer_id,
+        &registry,
+        &assignments,
+        &operations,
+        &pairing,
+        &development,
+    )
+}
+
+fn remove_session_singer_owned(
+    singer_id: &str,
+    registry: &SessionSingerRegistry,
+    assignments: &crate::microphones::MicrophoneAssignmentRegistry,
+    operations: &crate::microphones::MicrophoneRegistryOperations,
+    pairing: &crate::development_pairing::DevelopmentPairingCoordinator,
+    development: &crate::development_protocol::DevelopmentProtocolManager,
+) -> Result<SessionSingerProjection, SessionSingerError> {
+    let (removed, revocation) = pairing.remove_participant(singer_id, || {
+        let _operation = operations.lock();
+        let in_use = assignments.assignment_for_singer(singer_id).is_some()
+            || assignments.waiting_for_singer(singer_id).is_some();
+        let removed = registry.remove(singer_id, in_use)?;
+        assignments.clear_unassigned_singer_metadata(singer_id);
+        Ok(removed)
+    })?;
+    if let Some(revocation) = revocation {
+        development.revoke_participant(revocation);
+    }
     Ok(removed)
 }

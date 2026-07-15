@@ -39,30 +39,31 @@ export function useSessionSingers() {
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
+  const refresh = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const projection = await loadSessionSingers();
+      if (mountedRef.current) {
+        setSingers(projection);
+        setError(null);
+      }
+      return projection;
+    } catch (cause) {
+      console.error("Session singers could not be loaded.", cause);
+      if (mountedRef.current) setError("Could not load singers.");
+      return [];
+    } finally {
+      if (mountedRef.current) setIsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
-    void loadSessionSingers()
-      .then((projection) => {
-        if (mountedRef.current) {
-          setSingers(projection);
-          setError(null);
-        }
-      })
-      .catch((cause: unknown) => {
-        console.error("Session singers could not be loaded.", cause);
-        if (mountedRef.current) {
-          setError("Could not load singers.");
-        }
-      })
-      .finally(() => {
-        if (mountedRef.current) {
-          setIsLoading(false);
-        }
-      });
+    void refresh();
     return () => {
       mountedRef.current = false;
     };
-  }, []);
+  }, [refresh]);
 
   const create = useCallback(async () => {
     setIsCreating(true);
@@ -173,6 +174,7 @@ export function useSessionSingers() {
     isCreating,
     isLoading,
     pendingSingerId,
+    refresh,
     remove,
     rename,
     singers,

@@ -7,7 +7,8 @@ mod tests;
 pub(crate) use coordinator::ParticipantCommitCoordinator;
 pub(crate) use models::{
     AssignMicrophoneToSingerRequest, CreateSingerWithMicrophoneRequest,
-    ParticipantCommitDiagnosticProjection, ParticipantCommitError, ParticipantCommitProjection,
+    ParticipantCommitDiagnosticProjection, ParticipantCommitError, ParticipantCommitErrorCode,
+    ParticipantCommitProjection,
 };
 
 #[tauri::command]

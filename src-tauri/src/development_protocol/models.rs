@@ -124,6 +124,38 @@ pub(crate) enum ClientControlMessage {
         #[serde(rename = "sentAtMonotonicMs")]
         sent_at_monotonic_ms: Option<u64>,
     },
+    PairingClaim {
+        #[serde(rename = "profileVersion")]
+        profile_version: u8,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "offerId")]
+        offer_id: String,
+        #[serde(rename = "pairingToken")]
+        pairing_token: String,
+        #[serde(rename = "clientDeviceId")]
+        client_device_id: String,
+        #[serde(rename = "clientName")]
+        client_name: String,
+    },
+    ParticipantSetupProposal {
+        #[serde(rename = "profileVersion")]
+        profile_version: u8,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "offerId")]
+        offer_id: String,
+        #[serde(rename = "participantSetupToken")]
+        participant_setup_token: String,
+        #[serde(rename = "clientDeviceId")]
+        client_device_id: String,
+        #[serde(rename = "localParticipantProfileId")]
+        local_participant_profile_id: String,
+        #[serde(rename = "preferredDisplayName")]
+        preferred_display_name: String,
+        #[serde(rename = "previousHostParticipantReference")]
+        previous_host_participant_reference: Option<String>,
+    },
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -200,6 +232,77 @@ pub(crate) enum HostControlMessage {
     DevelopmentError {
         #[serde(rename = "profileVersion")]
         profile_version: u8,
+        #[serde(rename = "reasonCode")]
+        reason_code: String,
+        message: String,
+    },
+    DevelopmentPairingError {
+        #[serde(rename = "profileVersion")]
+        profile_version: u8,
+        #[serde(rename = "requestId")]
+        request_id: Option<String>,
+        #[serde(rename = "reasonCode")]
+        reason_code: crate::development_pairing::PairingErrorCode,
+        message: String,
+    },
+    PairingAcceptedForSetup {
+        #[serde(rename = "profileVersion")]
+        profile_version: u8,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "offerId")]
+        offer_id: String,
+        #[serde(rename = "participantSetupToken")]
+        participant_setup_token: String,
+        #[serde(rename = "hostDisplayName")]
+        host_display_name: String,
+        #[serde(rename = "pairingScope")]
+        pairing_scope: crate::development_pairing::PairingScopeProjection,
+        #[serde(rename = "participantSetupRequired")]
+        participant_setup_required: bool,
+    },
+    ParticipantAccepted {
+        #[serde(rename = "profileVersion")]
+        profile_version: u8,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(flatten)]
+        participant: crate::development_pairing::AcceptedParticipantProjection,
+    },
+    ParticipantRejected {
+        #[serde(rename = "profileVersion")]
+        profile_version: u8,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        status: String,
+        #[serde(rename = "reasonCode")]
+        reason_code: crate::development_pairing::PairingErrorCode,
+        message: String,
+    },
+    ParticipantRevoked {
+        #[serde(rename = "profileVersion")]
+        profile_version: u8,
+        status: String,
+        #[serde(rename = "sessionSingerId")]
+        session_singer_id: String,
+        #[serde(rename = "reasonCode")]
+        reason_code: String,
+        message: String,
+    },
+    PairingOfferExpired {
+        #[serde(rename = "profileVersion")]
+        profile_version: u8,
+        #[serde(rename = "offerId")]
+        offer_id: String,
+        #[serde(rename = "reasonCode")]
+        reason_code: String,
+        message: String,
+    },
+    PairingOfferCancelled {
+        #[serde(rename = "profileVersion")]
+        profile_version: u8,
+        #[serde(rename = "offerId")]
+        offer_id: String,
         #[serde(rename = "reasonCode")]
         reason_code: String,
         message: String,

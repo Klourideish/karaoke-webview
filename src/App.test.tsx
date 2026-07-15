@@ -12,6 +12,7 @@ import type {
   PerformanceMicrophoneReadiness,
 } from "./microphones/types";
 import type { DiagnosticCaptureSnapshot } from "./microphones/diagnosticCapture";
+import type { DevelopmentPairingProjection, PairingOfferProjection } from "./pairing/types";
 import type { ParticipantCommitDiagnosticProjection } from "./session-singers/types";
 
 const tauriMocks = vi.hoisted(() => ({
@@ -164,10 +165,10 @@ const microphoneWaitingState = {
 };
 
 const initialSessionSingers = [
-  { id: "singer-1", displayName: "Singer 1", createdOrder: 1 },
-  { id: "singer-2", displayName: "Singer 2", createdOrder: 2 },
-  { id: "singer-3", displayName: "Singer 3", createdOrder: 3 },
-  { id: "singer-4", displayName: "Singer 4", createdOrder: 4 },
+  { id: "singer-1", displayName: "Dad", createdOrder: 1 },
+  { id: "singer-2", displayName: "Mum", createdOrder: 2 },
+  { id: "singer-3", displayName: "Jack", createdOrder: 3 },
+  { id: "singer-4", displayName: "Ellie", createdOrder: 4 },
 ];
 
 const emptyParticipantCommitDiagnostics = {
@@ -180,8 +181,85 @@ const emptyParticipantCommitDiagnostics = {
   failureReason: null,
   failureMessage: null,
 };
-let sessionSingerState = initialSessionSingers.map((singer) => ({ ...singer }));
-let nextSessionSingerNumber = 5;
+
+const idleDevelopmentPairingProjection: DevelopmentPairingProjection = {
+  status: {
+    activeOfferId: null,
+    lifecycleState: null,
+    hostAddress: null,
+    controlPort: null,
+    expiresInSeconds: null,
+    expiresAt: null,
+    lifetimeSeconds: null,
+    claimedClientName: null,
+    claimedClientDeviceId: null,
+    participantSetupTokenIssued: false,
+    pendingParticipant: null,
+    acceptedParticipant: null,
+    lastRevokedParticipant: null,
+    lastRejectionReason: null,
+    lastRejectionMessage: null,
+  },
+  diagnostics: {
+    retainedOfferCount: 0,
+    offersCreated: 0,
+    offersExpired: 0,
+    offersCancelled: 0,
+    offersConsumed: 0,
+    duplicateClaims: 0,
+    invalidTokens: 0,
+    proposalsReceived: 0,
+    acceptedParticipants: 0,
+    revokedParticipants: 0,
+    rejectedProposals: 0,
+  },
+};
+
+const developmentPairingOffer: PairingOfferProjection = {
+  profileVersion: 0,
+  offerId: "pairing-offer-1",
+  hostDisplayName: "Karaoke Host",
+  hostAddress: "192.168.1.78",
+  controlPort: 45820,
+  pairingToken: "pairing-token-for-tests",
+  expiresAt: "2026-07-14T12:02:00Z",
+  lifetimeSeconds: 120,
+  pairingScope: { kind: "generic" },
+  qrPayload: '{"type":"development_pairing_offer","profileVersion":0}',
+};
+
+const pendingDevelopmentPairingProjection: DevelopmentPairingProjection = {
+  status: {
+    ...idleDevelopmentPairingProjection.status,
+    activeOfferId: developmentPairingOffer.offerId,
+    lifecycleState: "awaiting-operator-approval",
+    hostAddress: developmentPairingOffer.hostAddress,
+    controlPort: developmentPairingOffer.controlPort,
+    expiresInSeconds: 91,
+    expiresAt: developmentPairingOffer.expiresAt,
+    lifetimeSeconds: developmentPairingOffer.lifetimeSeconds,
+    claimedClientName: "Kyle's Phone",
+    claimedClientDeviceId: "android-device-1",
+    participantSetupTokenIssued: true,
+    pendingParticipant: {
+      requestId: "participant-proposal-1",
+      clientDeviceId: "android-device-1",
+      clientName: "Kyle's Phone",
+      localParticipantProfileId: "local-profile-1",
+      preferredDisplayName: "Kyle",
+      previousHostParticipantReference: null,
+    },
+  },
+  diagnostics: {
+    ...idleDevelopmentPairingProjection.diagnostics,
+    retainedOfferCount: 1,
+    offersCreated: 1,
+    offersConsumed: 1,
+    proposalsReceived: 1,
+  },
+};
+let sessionSingerState: typeof initialSessionSingers = [];
+let nextSessionSingerNumber = 1;
 
 const disconnectedRecoveryState = {
   channelId: microphoneChannel.id,
@@ -665,6 +743,14 @@ function mockSuccessfulLibraryInvoke(command: string) {
     return Promise.resolve(emptyParticipantCommitDiagnostics);
   }
 
+  if (command === "get_development_pairing_status") {
+    return Promise.resolve(idleDevelopmentPairingProjection);
+  }
+
+  if (command === "get_development_pairing_diagnostics") {
+    return Promise.resolve(idleDevelopmentPairingProjection.diagnostics);
+  }
+
   if (command === "get_development_protocol_status") {
     return Promise.resolve(stoppedDevelopmentStatus);
   }
@@ -743,8 +829,8 @@ beforeEach(() => {
   tauriMocks.invoke.mockReset();
   tauriMocks.open.mockReset();
   tauriMocks.open.mockResolvedValue(null);
-  sessionSingerState = initialSessionSingers.map((singer) => ({ ...singer }));
-  nextSessionSingerNumber = 5;
+  sessionSingerState = [];
+  nextSessionSingerNumber = 1;
   nextAnimationFrameId = 1;
   animationFrameCallbacks = new Map<number, FrameRequestCallback>();
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -961,9 +1047,16 @@ describe("Microphone workspace", () => {
     monitorDiagnostics?: typeof idleDiagnosticMonitorDiagnostics;
     participantCommitFailures?: number;
     microphoneSelectionFailures?: number;
+    pairingProjection?: DevelopmentPairingProjection;
+    pairingProjectionAfterCreate?: DevelopmentPairingProjection;
+    pairingCreateError?: { reasonCode: string; message: string };
+    singers?: typeof initialSessionSingers;
   };
 
   function mockMicrophoneWorkspace(state: MicrophoneInvokeState = {}) {
+    sessionSingerState = (state.singers ?? initialSessionSingers).map((singer) => ({ ...singer }));
+    nextSessionSingerNumber =
+      sessionSingerState.reduce((maximum, singer) => Math.max(maximum, singer.createdOrder), 0) + 1;
     let sources = state.sources ?? discoveredMicrophones;
     let channels = state.channels ? [...state.channels] : [];
     let assignments = state.assignments ? [...state.assignments] : [];
@@ -974,6 +1067,7 @@ describe("Microphone workspace", () => {
     let developmentDiagnostics = state.developmentDiagnostics ?? idleDevelopmentDiagnostics;
     let monitorStatus = state.monitorStatus ?? idleDiagnosticMonitorStatus;
     let monitorDiagnostics = state.monitorDiagnostics ?? idleDiagnosticMonitorDiagnostics;
+    let pairingProjection = state.pairingProjection ?? idleDevelopmentPairingProjection;
     let participantCommitDiagnostics: ParticipantCommitDiagnosticProjection = {
       ...emptyParticipantCommitDiagnostics,
     };
@@ -990,6 +1084,101 @@ describe("Microphone workspace", () => {
 
       if (command === "get_participant_commit_diagnostics") {
         return Promise.resolve(participantCommitDiagnostics);
+      }
+
+      if (command === "get_development_pairing_status") {
+        return Promise.resolve(pairingProjection);
+      }
+
+      if (command === "get_development_pairing_diagnostics") {
+        return Promise.resolve(pairingProjection.diagnostics);
+      }
+
+      if (command === "create_development_pairing_offer") {
+        if (state.pairingCreateError) {
+          return Promise.reject(state.pairingCreateError);
+        }
+        pairingProjection =
+          state.pairingProjectionAfterCreate ??
+          ({
+            status: {
+              ...idleDevelopmentPairingProjection.status,
+              activeOfferId: developmentPairingOffer.offerId,
+              lifecycleState: "displayed",
+              hostAddress: developmentPairingOffer.hostAddress,
+              controlPort: developmentPairingOffer.controlPort,
+              expiresInSeconds: developmentPairingOffer.lifetimeSeconds,
+              expiresAt: developmentPairingOffer.expiresAt,
+              lifetimeSeconds: developmentPairingOffer.lifetimeSeconds,
+            },
+            diagnostics: {
+              ...idleDevelopmentPairingProjection.diagnostics,
+              retainedOfferCount: 1,
+              offersCreated: 1,
+            },
+          } satisfies DevelopmentPairingProjection);
+        return Promise.resolve(developmentPairingOffer);
+      }
+
+      if (command === "cancel_development_pairing_offer") {
+        pairingProjection = {
+          ...pairingProjection,
+          status: { ...pairingProjection.status, lifecycleState: "cancelled" },
+          diagnostics: {
+            ...pairingProjection.diagnostics,
+            offersCancelled: pairingProjection.diagnostics.offersCancelled + 1,
+          },
+        };
+        return Promise.resolve(pairingProjection);
+      }
+
+      if (command === "reject_development_pairing_proposal") {
+        pairingProjection = {
+          ...pairingProjection,
+          status: {
+            ...pairingProjection.status,
+            lifecycleState: "rejected",
+            lastRejectionReason: "policy-rejected",
+            lastRejectionMessage: "The operator rejected this participant.",
+          },
+          diagnostics: {
+            ...pairingProjection.diagnostics,
+            rejectedProposals: pairingProjection.diagnostics.rejectedProposals + 1,
+          },
+        };
+        return Promise.resolve(pairingProjection);
+      }
+
+      if (command === "accept_development_pairing_proposal") {
+        const acceptedSinger = {
+          id: `singer-${nextSessionSingerNumber}`,
+          displayName:
+            pairingProjection.status.pendingParticipant?.preferredDisplayName ?? "Phone Singer",
+          createdOrder: nextSessionSingerNumber,
+        };
+        nextSessionSingerNumber += 1;
+        sessionSingerState = [...sessionSingerState, acceptedSinger];
+        pairingProjection = {
+          ...pairingProjection,
+          status: {
+            ...pairingProjection.status,
+            lifecycleState: "accepted",
+            acceptedParticipant: {
+              status: "accepted",
+              hostDisplayName: "Karaoke Host",
+              sessionSingerId: acceptedSinger.id,
+              acceptedDisplayName: acceptedSinger.displayName,
+              microphone: { state: "ready", message: "Microphone ready." },
+              queuedSongCount: 0,
+              nextUp: { state: "not-next" },
+            },
+          },
+          diagnostics: {
+            ...pairingProjection.diagnostics,
+            acceptedParticipants: pairingProjection.diagnostics.acceptedParticipants + 1,
+          },
+        };
+        return Promise.resolve(pairingProjection);
       }
 
       if (command === "create_session_singer_with_microphone") {
@@ -1414,19 +1603,132 @@ describe("Microphone workspace", () => {
     return dialog;
   }
 
-  it("opens a restrained Sync dialog with phone pairing clearly deferred", async () => {
+  it("creates one development pairing offer and renders its QR projection", async () => {
     mockMicrophoneWorkspace({ sources: [discoveredMicrophones[0]] });
     const user = userEvent.setup();
     render(<App />);
 
-    expect(await screen.findByDisplayValue("Singer 1")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("Dad")).toBeInTheDocument();
     expect(screen.queryByText(/empty singer/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Sync/ }));
 
     const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
-    expect(within(dialog).getByRole("button", { name: "Connect phone" })).toBeDisabled();
-    expect(within(dialog).getByText("QR pairing will be added in P5-002.")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Use physical microphone" })).toBeEnabled();
+    await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
+
+    expect(await within(dialog).findByLabelText("Development pairing QR code")).toBeInTheDocument();
+    expect(within(dialog).getByText("Host: 192.168.1.78:45820")).toBeInTheDocument();
+    expect(within(dialog).getByText("Expires in 120 seconds.")).toBeInTheDocument();
+    expect(
+      tauriMocks.invoke.mock.calls.filter(
+        ([command]) => command === "create_development_pairing_offer",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("keeps a typed offer-creation error visible after idle status polling", async () => {
+    mockMicrophoneWorkspace({
+      pairingCreateError: {
+        reasonCode: "listener-not-active",
+        message: "Start the insecure development listener before pairing a phone.",
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /Sync/ }));
+    const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
+    await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
+
+    const expected = "Start the insecure development listener in Developer before pairing a phone.";
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(expected);
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 600));
+    });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(expected);
+    expect(within(dialog).queryByLabelText("Development pairing QR code")).not.toBeInTheDocument();
+  });
+
+  it("does not duplicate pairing offer creation under StrictMode", async () => {
+    mockMicrophoneWorkspace();
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /Sync/ }));
+    const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
+    await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
+    await within(dialog).findByLabelText("Development pairing QR code");
+
+    expect(
+      tauriMocks.invoke.mock.calls.filter(
+        ([command]) => command === "create_development_pairing_offer",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("cancels the active pairing offer when the operator closes Sync", async () => {
+    mockMicrophoneWorkspace();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /Sync/ }));
+    const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
+    await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
+    await within(dialog).findByLabelText("Development pairing QR code");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("cancel_development_pairing_offer", {
+      request: expect.objectContaining({ offerId: developmentPairingOffer.offerId }),
+    });
+    expect(screen.queryByRole("dialog", { name: "Sync a singer" })).not.toBeInTheDocument();
+  });
+
+  it("reviews and accepts a phone proposal through one Host decision", async () => {
+    mockMicrophoneWorkspace({
+      pairingProjectionAfterCreate: pendingDevelopmentPairingProjection,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /Sync/ }));
+    const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
+    await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
+
+    expect(
+      await within(dialog).findByRole("heading", { name: "Review participant" }),
+    ).toBeVisible();
+    expect(within(dialog).getByText("Kyle")).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Accept participant" }));
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("accept_development_pairing_proposal", {
+      request: expect.objectContaining({ offerId: developmentPairingOffer.offerId }),
+    });
+    expect(await within(dialog).findByText("Kyle was added to this session.")).toBeVisible();
+    expect(await screen.findByDisplayValue("Kyle")).toBeVisible();
+  });
+
+  it("rejects a phone proposal without creating a singer", async () => {
+    mockMicrophoneWorkspace({
+      pairingProjectionAfterCreate: pendingDevelopmentPairingProjection,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /Sync/ }));
+    const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
+    await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
+    await user.click(await within(dialog).findByRole("button", { name: "Reject" }));
+
+    expect(await within(dialog).findByText("Participant not added")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Kyle, microphone/i })).not.toBeInTheDocument();
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "create_session_singer_with_microphone",
+      expect.anything(),
+    );
   });
 
   it("keeps selection, Back, and Cancel non-mutating", async () => {
@@ -1655,8 +1957,8 @@ describe("Microphone workspace", () => {
     const singerList = await screen.findByLabelText("Singer microphones");
     const rows = within(singerList).getAllByRole("article");
     expect(rows).toHaveLength(4);
-    expect(within(singerList).getByText("Singer 1")).toBeInTheDocument();
-    expect(within(singerList).getByText("Singer 4")).toBeInTheDocument();
+    expect(within(singerList).getByText("Dad")).toBeInTheDocument();
+    expect(within(singerList).getByText("Ellie")).toBeInTheDocument();
     expect(within(singerList).queryByText("microphone-channel-1")).not.toBeInTheDocument();
     expect(within(singerList).queryByText("windows-mic-primary")).not.toBeInTheDocument();
     expect(within(singerList).queryByText(/MicrophoneChannel/i)).not.toBeInTheDocument();
@@ -1941,34 +2243,30 @@ describe("Microphone workspace", () => {
     const singerBar = screen.getByRole("region", { name: "Singer bar" });
     expect(within(singerBar).getByText("Singers")).toBeInTheDocument();
     await waitFor(() =>
-      expect(within(singerBar).getByText("Singer 1, microphone ready")).toHaveClass(
-        "visually-hidden",
-      ),
+      expect(within(singerBar).getByText("Dad, microphone ready")).toHaveClass("visually-hidden"),
     );
-    expect(within(singerBar).getByText("Singer 2, microphone waiting")).toHaveClass(
+    expect(within(singerBar).getByText("Mum, microphone waiting")).toHaveClass("visually-hidden");
+    expect(within(singerBar).getByText("Jack, microphone unavailable")).toHaveClass(
       "visually-hidden",
     );
-    expect(within(singerBar).getByText("Singer 3, microphone unavailable")).toHaveClass(
-      "visually-hidden",
-    );
-    expect(within(singerBar).getByText("Singer 4, microphone unassigned")).toHaveClass(
+    expect(within(singerBar).getByText("Ellie, microphone unassigned")).toHaveClass(
       "visually-hidden",
     );
     expect(singerBar.querySelector('[data-status="ready"]')).toHaveAttribute(
       "title",
-      "Singer 1, microphone ready",
+      "Dad, microphone ready",
     );
     expect(singerBar.querySelector('[data-status="waiting"]')).toHaveAttribute(
       "title",
-      "Singer 2, microphone waiting",
+      "Mum, microphone waiting",
     );
     expect(singerBar.querySelector('[data-status="unavailable"]')).toHaveAttribute(
       "title",
-      "Singer 3, microphone unavailable",
+      "Jack, microphone unavailable",
     );
     expect(singerBar.querySelector('[data-status="unassigned"]')).toHaveAttribute(
       "title",
-      "Singer 4, microphone unassigned",
+      "Ellie, microphone unassigned",
     );
     expect(within(singerBar).queryByText(/^Ready$/)).not.toBeInTheDocument();
     expect(within(singerBar).queryByText(/^Waiting$/)).not.toBeInTheDocument();
@@ -1987,7 +2285,7 @@ describe("Microphone workspace", () => {
       "article",
     )[0];
 
-    expect(within(singerOne).getByRole("meter", { name: "Singer 1 input level" })).toHaveAttribute(
+    expect(within(singerOne).getByRole("meter", { name: "Dad input level" })).toHaveAttribute(
       "aria-valuenow",
       "0",
     );
@@ -2036,9 +2334,10 @@ describe("Microphone workspace", () => {
     const returnedSinger = within(await screen.findByLabelText("Singer microphones")).getAllByRole(
       "article",
     )[0];
-    expect(
-      within(returnedSinger).getByRole("meter", { name: "Singer 1 input level" }),
-    ).toHaveAttribute("aria-valuenow", "0");
+    expect(within(returnedSinger).getByRole("meter", { name: "Dad input level" })).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
     expect(
       tauriMocks.invoke.mock.calls.filter(([command]) => command === "start_diagnostic_capture"),
     ).toHaveLength(1);
@@ -2123,6 +2422,37 @@ describe("Microphone workspace", () => {
     expect(screen.getByLabelText("UDP port")).toHaveValue(45821);
     expect(screen.getByText(/Listener: Stopped \/ TCP 45820 \/ UDP 45821/)).toBeInTheDocument();
     expect(screen.getByText(/Capture handoff: 0\/4 frames/)).toBeInTheDocument();
+  });
+
+  it("shows accepted participant revocation in Developer diagnostics", async () => {
+    mockMicrophoneWorkspace({
+      pairingProjection: {
+        status: {
+          ...idleDevelopmentPairingProjection.status,
+          lifecycleState: "accepted",
+          lastRevokedParticipant: {
+            sessionSingerId: "singer-1",
+            acceptedDisplayName: "Kyle",
+            reasonCode: "session-singer-removed",
+            message: "The Host removed this participant from the karaoke session.",
+          },
+        },
+        diagnostics: {
+          ...idleDevelopmentPairingProjection.diagnostics,
+          acceptedParticipants: 1,
+          revokedParticipants: 1,
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openDeveloperDiagnostics(user);
+
+    expect(screen.getByText(/Accepted: 1 \/ Revoked: 1/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Last revocation: Kyle \(session-singer-removed\)/),
+    ).toBeInTheDocument();
   });
 
   it("removes redundant operator workspace heading copy while preserving Developer context", async () => {
@@ -3621,17 +3951,31 @@ describe("Library workspace", () => {
 });
 
 describe("Singer shell", () => {
+  it("shows only the singer label and Sync action when the Host projection is empty", async () => {
+    const { container } = render(<App />);
+    const singerBar = screen.getByRole("region", { name: "Singer bar" });
+
+    await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("list_session_singers"));
+    expect(within(singerBar).getByText("Singers")).toBeInTheDocument();
+    expect(within(singerBar).getByRole("button", { name: "+ Sync" })).toBeInTheDocument();
+    expect(within(singerBar).queryByLabelText("Singer list")).not.toBeInTheDocument();
+    expect(container.querySelectorAll(".singer-item")).toHaveLength(0);
+    expect(screen.queryByText(/^Singer [1-4]$/)).not.toBeInTheDocument();
+  });
+
   it("renders Host projections and requests singer mutations without frontend-owned IDs", async () => {
+    sessionSingerState = initialSessionSingers.map((singer) => ({ ...singer }));
+    nextSessionSingerNumber = 5;
     const user = userEvent.setup();
     render(<App />);
 
     expect(screen.getByRole("region", { name: "Singer bar" })).toBeInTheDocument();
-    expect(await screen.findByDisplayValue("Singer 1")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Singer 4")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("Dad")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Ellie")).toBeInTheDocument();
 
     expect(screen.getByRole("button", { name: /Sync/ })).toBeInTheDocument();
 
-    const singerTwoInput = screen.getByDisplayValue("Singer 2");
+    const singerTwoInput = screen.getByDisplayValue("Mum");
     await user.clear(singerTwoInput);
     await user.type(singerTwoInput, "Lead singer");
     fireEvent.blur(singerTwoInput);
@@ -3642,8 +3986,8 @@ describe("Singer shell", () => {
       }),
     );
 
-    await user.click(screen.getByRole("button", { name: "Remove Singer 1" }));
-    await waitFor(() => expect(screen.queryByDisplayValue("Singer 1")).not.toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Remove Dad" }));
+    await waitFor(() => expect(screen.queryByDisplayValue("Dad")).not.toBeInTheDocument());
     expect(tauriMocks.invoke).toHaveBeenCalledWith("remove_session_singer", {
       singerId: "singer-1",
     });
@@ -3651,8 +3995,10 @@ describe("Singer shell", () => {
   });
 
   it("loads Host singers once under StrictMode and does not recreate them", async () => {
+    sessionSingerState = initialSessionSingers.map((singer) => ({ ...singer }));
+    nextSessionSingerNumber = 5;
     renderStrictApp();
-    expect(await screen.findByDisplayValue("Singer 1")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("Dad")).toBeInTheDocument();
     expect(
       tauriMocks.invoke.mock.calls.filter(([command]) => command === "list_session_singers"),
     ).toHaveLength(1);

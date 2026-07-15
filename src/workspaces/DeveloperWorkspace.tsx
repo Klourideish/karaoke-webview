@@ -11,6 +11,7 @@ import type { useMicrophoneChannels } from "../microphones/useMicrophoneChannels
 import type { useMicrophoneRecovery } from "../microphones/useMicrophoneRecovery";
 import type { useParticipantCommitDiagnostics } from "../session-singers/useParticipantCommitDiagnostics";
 import { usePerformanceMicrophoneReadiness } from "../microphones/usePerformanceMicrophoneReadiness";
+import { useDevelopmentPairing } from "../pairing/useDevelopmentPairing";
 
 export function DeveloperWorkspace({
   assignments,
@@ -30,6 +31,7 @@ export function DeveloperWorkspace({
   singers: Singer[];
 }) {
   const development = useDevelopmentProtocol();
+  const pairing = useDevelopmentPairing();
   const diagnosticMonitor = useDiagnosticMonitor();
   const readiness = usePerformanceMicrophoneReadiness();
   const [developmentBindAddress, setDevelopmentBindAddress] = useState("127.0.0.1");
@@ -133,6 +135,70 @@ export function DeveloperWorkspace({
       </div>
 
       <div className="developer-diagnostics-panel">
+        <section className="developer-panel" aria-labelledby="development-pairing-heading">
+          <div>
+            <p className="region-label">Developer</p>
+            <h3 id="development-pairing-heading">Development pairing</h3>
+          </div>
+          <p className="developer-warning" role="note">
+            INSECURE DEVELOPMENT PAIRING - tokens and participant setup use plaintext control
+            traffic.
+          </p>
+          <DiagnosticText>
+            <p>
+              Offer: {pairing.projection.status.activeOfferId ?? "None"} / State:{" "}
+              {pairing.projection.status.lifecycleState ?? "idle"}
+            </p>
+            <p>
+              Endpoint: {pairing.projection.status.hostAddress ?? "None"}:
+              {pairing.projection.status.controlPort ?? "-"} / Expires in:{" "}
+              {pairing.projection.status.expiresInSeconds ?? "-"}s
+            </p>
+            <p>
+              Client: {pairing.projection.status.claimedClientName ?? "None"} / Setup token issued:{" "}
+              {pairing.projection.status.participantSetupTokenIssued ? "Yes" : "No"}
+            </p>
+            <p>
+              Proposal:{" "}
+              {pairing.projection.status.pendingParticipant?.preferredDisplayName ?? "None"}
+              {" / Accepted: "}
+              {pairing.projection.status.acceptedParticipant?.acceptedDisplayName ?? "None"}
+            </p>
+            <p>
+              Offers: {pairing.projection.diagnostics.offersCreated} / Consumed:{" "}
+              {pairing.projection.diagnostics.offersConsumed} / Expired:{" "}
+              {pairing.projection.diagnostics.offersExpired} / Cancelled:{" "}
+              {pairing.projection.diagnostics.offersCancelled}
+            </p>
+            <p>
+              Proposals: {pairing.projection.diagnostics.proposalsReceived} / Accepted:{" "}
+              {pairing.projection.diagnostics.acceptedParticipants} / Revoked:{" "}
+              {pairing.projection.diagnostics.revokedParticipants} / Rejected:{" "}
+              {pairing.projection.diagnostics.rejectedProposals} / Duplicate claims:{" "}
+              {pairing.projection.diagnostics.duplicateClaims} / Invalid tokens:{" "}
+              {pairing.projection.diagnostics.invalidTokens}
+            </p>
+            {pairing.projection.status.lastRejectionMessage ? (
+              <p>
+                Last rejection: {pairing.projection.status.lastRejectionMessage} ({" "}
+                {pairing.projection.status.lastRejectionReason})
+              </p>
+            ) : null}
+            {pairing.projection.status.lastRevokedParticipant ? (
+              <p>
+                Last revocation:{" "}
+                {pairing.projection.status.lastRevokedParticipant.acceptedDisplayName}
+                {" ("}
+                {pairing.projection.status.lastRevokedParticipant.reasonCode})
+              </p>
+            ) : null}
+          </DiagnosticText>
+          {pairing.error ? (
+            <p className="microphone-error" role="alert">
+              {pairing.error}
+            </p>
+          ) : null}
+        </section>
         <section className="developer-panel" aria-labelledby="participant-commit-heading">
           <div>
             <p className="region-label">Developer</p>

@@ -384,6 +384,11 @@ Suggested next-up states:
 
 Queued-song count and next-up state are optional and future-compatible in V0.
 
+If the Host later removes the accepted `SessionSinger`, it revokes the participant relationship and
+sends `participant_revoked` on the accepted control connection. Android must leave its accepted
+participant state when it receives that authoritative outcome. Revocation also ends any active audio
+stream authorization; it does not delete Android's local participant profile.
+
 ---
 
 # 12. Generic Pairing Flow
@@ -653,7 +658,25 @@ Host to Android.
 }
 ```
 
-## 19.7 Offer Expired
+## 19.7 Participant Revoked
+
+Host to Android after an accepted Host participant is removed.
+
+```json
+{
+  "type": "participant_revoked",
+  "profileVersion": 0,
+  "status": "revoked",
+  "sessionSingerId": "host-owned-session-singer-id",
+  "reasonCode": "session-singer-removed",
+  "message": "The Host removed this participant from the karaoke session."
+}
+```
+
+This is an authoritative lifecycle outcome, not a new pairing rejection. Duplicate removal attempts
+must not emit duplicate revocation notifications.
+
+## 19.8 Offer Expired
 
 Host to Android or Host-local projection.
 
@@ -667,7 +690,7 @@ Host to Android or Host-local projection.
 }
 ```
 
-## 19.8 Offer Cancelled
+## 19.9 Offer Cancelled
 
 Host to Android or Host-local projection.
 
@@ -681,7 +704,7 @@ Host to Android or Host-local projection.
 }
 ```
 
-## 19.9 Development Error
+## 19.10 Development Error
 
 Either side may send a typed development error.
 
@@ -743,6 +766,7 @@ This profile is complete when Host and Android agents can independently implemen
 - Host validation;
 - stable rejection reason codes;
 - accepted participant projection;
+- accepted participant revocation;
 - expiry and cancellation;
 - returning local profile hints;
 - clear distinction between pairing, participant setup, assignment, and stream authorization.

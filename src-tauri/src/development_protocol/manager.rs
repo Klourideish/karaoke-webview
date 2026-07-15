@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     io::{Read, Write},
     net::{Shutdown, TcpListener, TcpStream, UdpSocket},
     sync::{
@@ -14,6 +15,10 @@ use crate::{
         backend::{AudioFrameConsumer, CaptureEnd, LevelConsumer},
         levels::normalized_levels,
         CaptureAudioFrame, MicrophoneLevelSnapshot, MonitorSampleEncoding,
+    },
+    development_pairing::{
+        DevelopmentPairingCoordinator, PairingClaim, PairingConnectionContext, PairingError,
+        PairingErrorCode, PairingOutboundMessage, ParticipantSetupProposal,
     },
     microphones::{DiscoveredMicrophoneSource, MicrophoneSourceAvailability, MicrophoneSourceKind},
 };
@@ -67,6 +72,7 @@ struct ActiveConnection {
     session_id: String,
     source_id: String,
     client_name: String,
+    client_device_id: String,
     last_heartbeat: Instant,
 }
 
@@ -96,12 +102,14 @@ struct ManagerInner {
     next_connection: u64,
     next_session: u64,
     next_stream: u32,
+    outbound_control: VecDeque<HostControlMessage>,
 }
 
 pub(crate) struct DevelopmentProtocolManager {
     operations: Mutex<()>,
     inner: Arc<Mutex<ManagerInner>>,
     workers: Mutex<Option<ListenerWorkers>>,
+    pairing: Arc<DevelopmentPairingCoordinator>,
 }
 
 impl Default for DevelopmentProtocolManager {
@@ -112,6 +120,10 @@ impl Default for DevelopmentProtocolManager {
 
 impl DevelopmentProtocolManager {
     pub(crate) fn new() -> Self {
+        Self::with_pairing(Arc::new(DevelopmentPairingCoordinator::default()))
+    }
+
+    pub(crate) fn with_pairing(pairing: Arc<DevelopmentPairingCoordinator>) -> Self {
         Self {
             operations: Mutex::new(()),
             inner: Arc::new(Mutex::new(ManagerInner {
@@ -130,8 +142,10 @@ impl DevelopmentProtocolManager {
                 next_connection: 1,
                 next_session: 1,
                 next_stream: 1,
+                outbound_control: VecDeque::new(),
             })),
             workers: Mutex::new(None),
+            pairing,
         }
     }
     pub(crate) fn start(
@@ -194,6 +208,7 @@ impl DevelopmentProtocolManager {
         let tcp_inner = Arc::clone(&self.inner);
         let tcp_shutdown = Arc::clone(&shutdown);
         let tcp_active_control = Arc::clone(&active_control);
+        let tcp_pairing = Arc::clone(&self.pairing);
         let tcp_worker = thread::spawn(move || {
             run_tcp_listener(
                 tcp_listener,
@@ -201,6 +216,7 @@ impl DevelopmentProtocolManager {
                 stop_tcp_rx,
                 tcp_shutdown,
                 tcp_active_control,
+                tcp_pairing,
             )
         });
         let udp_inner = Arc::clone(&self.inner);
@@ -224,6 +240,7 @@ impl DevelopmentProtocolManager {
         let _operation = lock(&self.operations);
         self.clear_runtime_state("development-listener-stopped");
         self.stop_workers();
+        self.pairing.listener_stopped();
         lock(&self.inner).listener_state = DevelopmentListenerState::Stopped;
         self.projection()
     }
@@ -245,6 +262,57 @@ impl DevelopmentProtocolManager {
         self.sources().iter().any(|source| {
             source.id == source_id && source.availability == MicrophoneSourceAvailability::Available
         })
+    }
+
+    pub(crate) fn pairing_endpoint(&self) -> Result<(String, u16), PairingError> {
+        let inner = lock(&self.inner);
+        if inner.listener_state != DevelopmentListenerState::Listening {
+            return Err(PairingError::new(
+                PairingErrorCode::ListenerNotActive,
+                "Start the insecure development listener before pairing a phone.",
+            ));
+        }
+        Ok((inner.bind_address.clone(), inner.tcp_port))
+    }
+
+    pub(crate) fn queue_pairing_outbound(&self, outbound: PairingOutboundMessage) {
+        lock(&self.inner)
+            .outbound_control
+            .push_back(host_message_from_pairing(outbound));
+    }
+
+    pub(crate) fn revoke_participant(
+        &self,
+        revocation: crate::development_pairing::ParticipantRevocation,
+    ) {
+        let handoff = {
+            let mut state = lock(&self.inner);
+            let matches_connection = revocation.connection_id.as_deref().is_some_and(|id| {
+                state
+                    .connection
+                    .as_ref()
+                    .is_some_and(|connection| connection.connection_id == id)
+            });
+            if !matches_connection {
+                return;
+            }
+            if let Some(stream) = state.stream.take() {
+                state
+                    .outbound_control
+                    .push_back(HostControlMessage::StreamStopped {
+                        profile_version: 0,
+                        audio_stream_id: stream.stream_id,
+                    });
+            }
+            state.jitter.clear();
+            state
+                .outbound_control
+                .push_back(host_message_from_pairing(revocation.outbound));
+            state.meter.as_ref().map(|meter| Arc::clone(&meter.handoff))
+        };
+        if let Some(handoff) = handoff {
+            handoff.clear();
+        }
     }
 
     pub(crate) fn run_capture(
@@ -342,6 +410,7 @@ impl DevelopmentProtocolManager {
             inner.jitter.clear();
             inner.closure_reason = Some(reason.to_string());
             inner.level = MicrophoneLevelSnapshot::idle();
+            inner.outbound_control.clear();
             meter
         };
         if let Some(meter) = meter {
@@ -364,7 +433,7 @@ impl DevelopmentProtocolManager {
 
     #[cfg(test)]
     pub(crate) fn handle_control_line_for_test(&self, line: &str) -> Option<HostControlMessage> {
-        handle_control_line(&self.inner, line)
+        handle_control_line(&self.inner, &self.pairing, line)
     }
 
     #[cfg(test)]
@@ -390,6 +459,7 @@ fn run_tcp_listener(
     stop: mpsc::Receiver<()>,
     shutdown: Arc<AtomicBool>,
     active_control: Arc<Mutex<Option<TcpStream>>>,
+    pairing: Arc<DevelopmentPairingCoordinator>,
 ) {
     loop {
         if shutdown.load(Ordering::SeqCst) || stop.try_recv().is_ok() {
@@ -401,7 +471,7 @@ fn run_tcp_listener(
                     let _ = stream.shutdown(Shutdown::Both);
                     break;
                 }
-                handle_stream(stream, &inner, &shutdown, &active_control);
+                handle_stream(stream, &inner, &shutdown, &active_control, &pairing);
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(50));
@@ -421,6 +491,7 @@ fn handle_stream(
     inner: &Arc<Mutex<ManagerInner>>,
     shutdown: &Arc<AtomicBool>,
     active_control: &Arc<Mutex<Option<TcpStream>>>,
+    pairing: &Arc<DevelopmentPairingCoordinator>,
 ) {
     let _ = stream.set_nonblocking(true);
     if let Ok(active_stream) = stream.try_clone() {
@@ -430,12 +501,18 @@ fn handle_stream(
     let mut buffer = [0u8; 1024];
     loop {
         if shutdown.load(Ordering::SeqCst) {
-            revoke_connection(inner, "development-listener-stopped");
+            revoke_connection(inner, pairing, "development-listener-stopped");
             break;
         }
+        if let Some(outbound) = pairing.expire_due() {
+            lock(inner)
+                .outbound_control
+                .push_back(host_message_from_pairing(outbound));
+        }
+        flush_outbound_responses(inner, &mut stream);
         match stream.read(&mut buffer) {
             Ok(0) => {
-                revoke_connection(inner, "control-connection-closed");
+                revoke_connection(inner, pairing, "control-connection-closed");
                 break;
             }
             Ok(size) => {
@@ -458,7 +535,7 @@ fn handle_stream(
                         write_host_response(&mut stream, &response);
                         continue;
                     };
-                    if let Some(response) = handle_control_line(inner, line) {
+                    if let Some(response) = handle_control_line(inner, pairing, line) {
                         write_host_response(&mut stream, &response);
                     }
                 }
@@ -481,13 +558,13 @@ fn handle_stream(
                     connection.last_heartbeat.elapsed() > HEARTBEAT_TIMEOUT
                 });
                 if timed_out {
-                    revoke_connection(inner, "heartbeat-timeout");
+                    revoke_connection(inner, pairing, "heartbeat-timeout");
                     break;
                 }
                 thread::sleep(Duration::from_millis(10));
             }
             Err(_) => {
-                revoke_connection(inner, "control-read-error");
+                revoke_connection(inner, pairing, "control-read-error");
                 break;
             }
         }
@@ -501,7 +578,112 @@ fn write_host_response(stream: &mut TcpStream, response: &HostControlMessage) {
     }
 }
 
-fn handle_control_line(inner: &Arc<Mutex<ManagerInner>>, line: &str) -> Option<HostControlMessage> {
+fn flush_outbound_responses(inner: &Arc<Mutex<ManagerInner>>, stream: &mut TcpStream) {
+    let responses = {
+        let mut state = lock(inner);
+        state.outbound_control.drain(..).collect::<Vec<_>>()
+    };
+    for response in responses {
+        write_host_response(stream, &response);
+    }
+}
+
+fn pairing_context(
+    inner: &Arc<Mutex<ManagerInner>>,
+) -> Result<PairingConnectionContext, PairingError> {
+    let state = lock(inner);
+    let connection = state.connection.as_ref().ok_or_else(|| {
+        PairingError::new(
+            PairingErrorCode::InvalidState,
+            "Complete the development client hello before pairing.",
+        )
+    })?;
+    Ok(PairingConnectionContext {
+        connection_id: connection.connection_id.clone(),
+        client_device_id: connection.client_device_id.clone(),
+        source_id: connection.source_id.clone(),
+    })
+}
+
+fn pairing_error_message(request_id: Option<String>, error: PairingError) -> HostControlMessage {
+    HostControlMessage::DevelopmentPairingError {
+        profile_version: 0,
+        request_id,
+        reason_code: error.reason_code,
+        message: error.message,
+    }
+}
+
+fn host_message_from_pairing(outbound: PairingOutboundMessage) -> HostControlMessage {
+    match outbound {
+        PairingOutboundMessage::AcceptedForSetup {
+            request_id,
+            offer_id,
+            participant_setup_token,
+            host_display_name,
+        } => HostControlMessage::PairingAcceptedForSetup {
+            profile_version: 0,
+            request_id,
+            offer_id,
+            participant_setup_token,
+            host_display_name,
+            pairing_scope: crate::development_pairing::PairingScopeProjection::Generic,
+            participant_setup_required: true,
+        },
+        PairingOutboundMessage::ParticipantAccepted {
+            request_id,
+            participant,
+        } => HostControlMessage::ParticipantAccepted {
+            profile_version: 0,
+            request_id,
+            participant,
+        },
+        PairingOutboundMessage::ParticipantRejected {
+            request_id,
+            reason_code,
+            message,
+        } => HostControlMessage::ParticipantRejected {
+            profile_version: 0,
+            request_id,
+            status: "rejected".to_string(),
+            reason_code,
+            message,
+        },
+        PairingOutboundMessage::ParticipantRevoked {
+            session_singer_id,
+            reason_code,
+            message,
+        } => HostControlMessage::ParticipantRevoked {
+            profile_version: 0,
+            status: "revoked".to_string(),
+            session_singer_id,
+            reason_code,
+            message,
+        },
+        PairingOutboundMessage::OfferExpired { offer_id } => {
+            HostControlMessage::PairingOfferExpired {
+                profile_version: 0,
+                offer_id,
+                reason_code: "offer-expired".to_string(),
+                message: "This pairing code expired.".to_string(),
+            }
+        }
+        PairingOutboundMessage::OfferCancelled { offer_id } => {
+            HostControlMessage::PairingOfferCancelled {
+                profile_version: 0,
+                offer_id,
+                reason_code: "offer-cancelled".to_string(),
+                message: "The Host cancelled this pairing code.".to_string(),
+            }
+        }
+    }
+}
+
+fn handle_control_line(
+    inner: &Arc<Mutex<ManagerInner>>,
+    pairing: &Arc<DevelopmentPairingCoordinator>,
+    line: &str,
+) -> Option<HostControlMessage> {
     let parsed = serde_json::from_str::<ClientControlMessage>(line);
     let message = match parsed {
         Ok(message) => message,
@@ -546,9 +728,9 @@ fn handle_control_line(inner: &Arc<Mutex<ManagerInner>>, line: &str) -> Option<H
                     session_id: session_id.clone(),
                     source_id: source_id.clone(),
                     client_name,
+                    client_device_id,
                     last_heartbeat: Instant::now(),
                 });
-                let _ = client_device_id;
                 state.stream = None;
                 state.jitter.clear();
                 (
@@ -685,6 +867,70 @@ fn handle_control_line(inner: &Arc<Mutex<ManagerInner>>, line: &str) -> Option<H
                 sent_at_monotonic_ms: 0,
             })
         }
+        ClientControlMessage::PairingClaim {
+            profile_version,
+            request_id,
+            offer_id,
+            pairing_token,
+            client_device_id,
+            client_name,
+        } => {
+            let context = match pairing_context(inner) {
+                Ok(context) => context,
+                Err(error) => return Some(pairing_error_message(Some(request_id), error)),
+            };
+            match pairing.claim(
+                context,
+                PairingClaim {
+                    profile_version,
+                    request_id: request_id.clone(),
+                    offer_id,
+                    pairing_token,
+                    client_device_id,
+                    client_name,
+                },
+            ) {
+                Ok(outbound) => Some(host_message_from_pairing(outbound)),
+                Err(error) => {
+                    lock(inner).counters.rejected_control_messages += 1;
+                    Some(pairing_error_message(Some(request_id), error))
+                }
+            }
+        }
+        ClientControlMessage::ParticipantSetupProposal {
+            profile_version,
+            request_id,
+            offer_id,
+            participant_setup_token,
+            client_device_id,
+            local_participant_profile_id,
+            preferred_display_name,
+            previous_host_participant_reference,
+        } => {
+            let context = match pairing_context(inner) {
+                Ok(context) => context,
+                Err(error) => return Some(pairing_error_message(Some(request_id), error)),
+            };
+            match pairing.submit_proposal(
+                context,
+                ParticipantSetupProposal {
+                    profile_version,
+                    request_id: request_id.clone(),
+                    offer_id,
+                    participant_setup_token,
+                    client_device_id,
+                    local_participant_profile_id,
+                    preferred_display_name,
+                    previous_host_participant_reference,
+                },
+            ) {
+                Ok(()) => None,
+                Err(error) => {
+                    lock(inner).counters.rejected_control_messages += 1;
+                    Some(pairing_error_message(Some(request_id), error))
+                }
+            }
+        }
     }
 }
 fn run_udp_listener(
@@ -779,7 +1025,18 @@ fn deliver_packet(inner: &Arc<Mutex<ManagerInner>>, packet: AudioPacket) {
     }
 }
 
-fn revoke_connection(inner: &Arc<Mutex<ManagerInner>>, reason: &str) {
+fn revoke_connection(
+    inner: &Arc<Mutex<ManagerInner>>,
+    pairing: &Arc<DevelopmentPairingCoordinator>,
+    reason: &str,
+) {
+    let connection_id = lock(inner)
+        .connection
+        .as_ref()
+        .map(|connection| connection.connection_id.clone());
+    if let Some(connection_id) = connection_id {
+        pairing.connection_lost(&connection_id);
+    }
     let meter = {
         let mut state = lock(inner);
         state.connection = None;
@@ -788,6 +1045,7 @@ fn revoke_connection(inner: &Arc<Mutex<ManagerInner>>, reason: &str) {
         state.jitter.clear();
         state.closure_reason = Some(reason.to_string());
         state.level = MicrophoneLevelSnapshot::idle();
+        state.outbound_control.clear();
         meter
     };
     if let Some(meter) = meter {
@@ -1035,6 +1293,78 @@ mod tests {
     }
 
     #[test]
+    fn development_pairing_messages_use_the_existing_control_connection() {
+        let manager = DevelopmentProtocolManager::new();
+        let offer = manager
+            .pairing
+            .create_offer(
+                crate::development_pairing::CreatePairingOfferRequest {
+                    request_id: "host-offer-1".to_string(),
+                },
+                "192.168.1.78".to_string(),
+                45_820,
+            )
+            .unwrap();
+        manager.handle_control_line_for_test(hello());
+
+        let claim = serde_json::json!({
+            "type": "pairing_claim",
+            "profileVersion": 0,
+            "requestId": "claim-1",
+            "offerId": offer.offer_id,
+            "pairingToken": offer.pairing_token,
+            "clientDeviceId": "dev-1",
+            "clientName": "Synthetic Android"
+        });
+        let response = manager
+            .handle_control_line_for_test(&claim.to_string())
+            .unwrap();
+        let setup_token = match &response {
+            HostControlMessage::PairingAcceptedForSetup {
+                participant_setup_token,
+                ..
+            } => participant_setup_token.clone(),
+            _ => panic!("unexpected pairing claim response"),
+        };
+        let serialized = serde_json::to_value(response).unwrap();
+        assert_eq!(serialized["type"], "pairing_accepted_for_setup");
+        assert_eq!(serialized["participantSetupRequired"], true);
+
+        let proposal = serde_json::json!({
+            "type": "participant_setup_proposal",
+            "profileVersion": 0,
+            "requestId": "proposal-1",
+            "offerId": claim["offerId"],
+            "participantSetupToken": setup_token,
+            "clientDeviceId": "dev-1",
+            "localParticipantProfileId": "profile-1",
+            "preferredDisplayName": "Kyle",
+            "previousHostParticipantReference": "stale-hint"
+        });
+        assert!(manager
+            .handle_control_line_for_test(&proposal.to_string())
+            .is_none());
+        assert_eq!(
+            manager.pairing.projection().status.lifecycle_state,
+            Some(crate::development_pairing::PairingOfferState::AwaitingOperatorApproval)
+        );
+    }
+
+    #[test]
+    fn development_pairing_endpoint_requires_an_active_listener() {
+        let manager = DevelopmentProtocolManager::new();
+        let error = manager.pairing_endpoint().unwrap_err();
+
+        assert_eq!(
+            error.reason_code,
+            crate::development_pairing::PairingErrorCode::ListenerNotActive
+        );
+        assert!(error
+            .message
+            .contains("Start the insecure development listener"));
+    }
+
+    #[test]
     fn invalid_profile_and_audio_profile_are_rejected() {
         let manager = DevelopmentProtocolManager::new();
         let rejected = manager
@@ -1102,6 +1432,43 @@ mod tests {
             })
         ));
         assert!(!manager.projection().status.stream_authorized);
+    }
+
+    #[test]
+    fn participant_revocation_stops_stream_and_queues_authoritative_lifecycle_outcome() {
+        let manager = DevelopmentProtocolManager::new();
+        authorize(&manager);
+        let connection_id = manager.projection().status.current_connection_id.unwrap();
+
+        manager.revoke_participant(crate::development_pairing::ParticipantRevocation {
+            connection_id: Some(connection_id),
+            outbound: PairingOutboundMessage::ParticipantRevoked {
+                session_singer_id: "singer-1".to_string(),
+                reason_code: "session-singer-removed".to_string(),
+                message: "The Host removed this participant from the karaoke session.".to_string(),
+            },
+        });
+
+        assert!(!manager.projection().status.stream_authorized);
+        let state = lock(&manager.inner);
+        assert!(matches!(
+            state.outbound_control.front(),
+            Some(HostControlMessage::StreamStopped {
+                audio_stream_id: 1,
+                ..
+            })
+        ));
+        assert!(matches!(
+            state.outbound_control.get(1),
+            Some(HostControlMessage::ParticipantRevoked {
+                session_singer_id,
+                reason_code,
+                ..
+            }) if session_singer_id == "singer-1" && reason_code == "session-singer-removed"
+        ));
+        let serialized = serde_json::to_value(&state.outbound_control[1]).unwrap();
+        assert_eq!(serialized["type"], "participant_revoked");
+        assert_eq!(serialized["status"], "revoked");
     }
 
     #[test]
@@ -1261,7 +1628,11 @@ mod tests {
         });
         disconnect_handoff.push(vec![3; 480]);
 
-        revoke_connection(&manager.inner, "control-connection-closed");
+        revoke_connection(
+            &manager.inner,
+            &manager.pairing,
+            "control-connection-closed",
+        );
 
         assert_eq!(disconnect_handoff.snapshot().depth, 0);
         assert_eq!(disconnect_handoff.push(vec![4; 480]), PushResult::Closed);

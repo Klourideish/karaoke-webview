@@ -17,16 +17,6 @@ pub(crate) struct SessionSingerRegistry {
 }
 
 impl SessionSingerRegistry {
-    pub(crate) fn with_initial_singers(count: u64) -> Self {
-        let registry = Self::default();
-        for singer_number in 1..=count {
-            registry
-                .create(Some(format!("Singer {singer_number}")))
-                .expect("built-in singer names are valid");
-        }
-        registry
-    }
-
     pub(crate) fn list(&self) -> Vec<SessionSingerProjection> {
         lock(&self.inner).singers.clone()
     }
