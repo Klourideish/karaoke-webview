@@ -18,8 +18,10 @@ pub(crate) use channel_registry::MicrophoneChannelRegistry;
 #[cfg(test)]
 pub(crate) use models::MicrophoneChannelState;
 pub(crate) use models::{
-    AutomaticAssignmentResult, MicrophoneAssignment, MicrophoneChannel, MicrophoneRecoveryState,
-    MicrophoneWaitingState, PerformanceMicrophoneReadiness, PerformanceMicrophoneReadinessRequest,
+    AutomaticAssignmentResult, KaraokeMode, MicrophoneAssignment, MicrophoneChannel,
+    MicrophoneRecoveryState, MicrophoneWaitingState, PerformanceMicrophoneReadiness,
+    PerformanceMicrophoneReadinessRequest, PerformanceMicrophoneReadinessStatus,
+    PerformanceReadinessPhase,
 };
 pub(crate) use models::{
     DiscoveredMicrophoneSource, MicrophoneSourceAvailability, MicrophoneSourceKind,
@@ -360,6 +362,30 @@ pub(crate) fn evaluate_performance_microphone_readiness(
     operations: tauri::State<'_, MicrophoneRegistryOperations>,
     development: tauri::State<'_, Arc<crate::development_protocol::DevelopmentProtocolManager>>,
 ) -> Result<PerformanceMicrophoneReadiness, String> {
+    let _operation = operations.lock();
+    let sources = discover_all_sources(Some(&development))?;
+    performance_readiness::evaluate(
+        &request,
+        &sources,
+        &channels,
+        &assignments,
+        &recovery,
+        capture.occupied_source_for_readiness().as_deref(),
+    )
+}
+
+pub(crate) fn evaluate_performance_readiness_owned(
+    app: &tauri::AppHandle,
+    request: PerformanceMicrophoneReadinessRequest,
+) -> Result<PerformanceMicrophoneReadiness, String> {
+    use tauri::Manager;
+
+    let channels = app.state::<MicrophoneChannelRegistry>();
+    let assignments = app.state::<MicrophoneAssignmentRegistry>();
+    let recovery = app.state::<MicrophoneRecoveryRegistry>();
+    let capture = app.state::<crate::capture::DiagnosticCaptureManager>();
+    let operations = app.state::<MicrophoneRegistryOperations>();
+    let development = app.state::<Arc<crate::development_protocol::DevelopmentProtocolManager>>();
     let _operation = operations.lock();
     let sources = discover_all_sources(Some(&development))?;
     performance_readiness::evaluate(

@@ -1279,6 +1279,19 @@ h3 {
   font-size: clamp(1.7rem, 1.25rem + 0.9vw, 3rem);
 }
 
+.performance-authority-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: baseline;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.performance-authority-summary strong {
+  color: var(--text);
+}
+
 .lyric-display {
   display: grid;
   gap: var(--space-5);

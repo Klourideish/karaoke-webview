@@ -15,6 +15,7 @@ import { useDevelopmentPairing } from "../pairing/useDevelopmentPairing";
 import { LibraryDiagnostics } from "../media-library/LibraryDiagnostics";
 import type { useMediaLibrary } from "../media-library/useMediaLibrary";
 import type { AudioPlayer } from "../audioPlayer";
+import type { PerformanceController } from "../performance/usePerformance";
 
 export function DeveloperWorkspace({
   audioPlayer,
@@ -24,6 +25,7 @@ export function DeveloperWorkspace({
   discovery,
   participantCommitDiagnostics,
   mediaLibrary,
+  performance,
   recovery,
   singers,
 }: {
@@ -34,6 +36,7 @@ export function DeveloperWorkspace({
   discovery: ReturnType<typeof useLocalMicrophones>;
   participantCommitDiagnostics: ReturnType<typeof useParticipantCommitDiagnostics>;
   mediaLibrary: ReturnType<typeof useMediaLibrary>;
+  performance: PerformanceController;
   recovery: ReturnType<typeof useMicrophoneRecovery>;
   singers: Singer[];
 }) {
@@ -51,6 +54,8 @@ export function DeveloperWorkspace({
   const [monitorFormError, setMonitorFormError] = useState<string | null>(null);
   const [readinessMode, setReadinessMode] = useState<KaraokeMode>("standard");
   const [allowAutomaticRecovery, setAllowAutomaticRecovery] = useState(true);
+  const [performanceSingerId, setPerformanceSingerId] = useState("");
+  const [performanceSongId, setPerformanceSongId] = useState("");
 
   const refreshDiscovery = discovery.refresh;
   useEffect(() => {
@@ -142,6 +147,113 @@ export function DeveloperWorkspace({
       </div>
 
       <div className="developer-diagnostics-panel">
+        <section className="developer-panel" aria-labelledby="performance-diagnostics-heading">
+          <div>
+            <p className="region-label">Developer</p>
+            <h3 id="performance-diagnostics-heading">Performance authority</h3>
+          </div>
+          <p className="view-description">
+            Creates a Host-owned Performance and verifies preparation, countdown, playback, and
+            terminal transitions.
+          </p>
+          <div className="developer-form-grid">
+            <label>
+              Performer
+              <select
+                className="microphone-select"
+                value={performanceSingerId}
+                onChange={(event) => setPerformanceSingerId(event.target.value)}
+              >
+                <option value="">Choose singer</option>
+                {singers.map((singer) => (
+                  <option key={singer.id} value={singer.id}>
+                    {singer.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Song
+              <select
+                className="microphone-select"
+                value={performanceSongId}
+                onChange={(event) => setPerformanceSongId(event.target.value)}
+              >
+                <option value="">Choose indexed song</option>
+                {(mediaLibrary.scanResult?.songs ?? []).map((song) => (
+                  <option key={song.id} value={song.id}>
+                    {song.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="microphone-test-actions">
+            <button
+              className="microphone-test-button"
+              disabled={!performanceSingerId || !performanceSongId}
+              type="button"
+              onClick={() => void performance.create(performanceSingerId, performanceSongId)}
+            >
+              Create Performance
+            </button>
+            <button
+              className="secondary-button"
+              disabled={
+                !performance.projection.active ||
+                !["created", "preparing", "ready", "countdown"].includes(
+                  performance.projection.active.state,
+                )
+              }
+              type="button"
+              onClick={() => {
+                const active = performance.projection.active;
+                if (active) void performance.cancel(active.id);
+              }}
+            >
+              Cancel preparation
+            </button>
+            <button
+              className="secondary-button"
+              disabled={
+                !performance.projection.active ||
+                !["countdown", "playing"].includes(performance.projection.active.state)
+              }
+              type="button"
+              onClick={() => {
+                const active = performance.projection.active;
+                if (active) void performance.skip(active.id);
+              }}
+            >
+              Skip Performance
+            </button>
+          </div>
+          <DiagnosticText>
+            <p>
+              Performance: {performance.projection.active?.id ?? "None"} / Lifecycle:{" "}
+              {performance.projection.active?.state ?? "None"}
+            </p>
+            <p>
+              Performer: {performance.projection.active?.performer.displayName ?? "None"} / Song:{" "}
+              {performance.projection.active?.song.title ?? "None"}
+            </p>
+            <p>
+              Countdown: {performance.projection.active?.countdownRemainingMs ?? "-"} ms / Results:{" "}
+              {performance.projection.active?.resultsRemainingMs ?? "-"} ms
+            </p>
+            <p>
+              Readiness: {performance.projection.active?.readiness.status ?? "None"} / Playback:{" "}
+              {performance.projection.active?.playback.state ?? "None"} / Attempt:{" "}
+              {performance.projection.active?.playback.attemptId ?? "None"}
+            </p>
+            <p>Last transition: {performance.projection.diagnostics.lastTransition ?? "None"}</p>
+          </DiagnosticText>
+          {performance.error ? (
+            <p className="microphone-error" role="alert">
+              {performance.error}
+            </p>
+          ) : null}
+        </section>
         <section className="developer-panel" aria-labelledby="library-diagnostics-heading">
           <div>
             <p className="region-label">Developer</p>

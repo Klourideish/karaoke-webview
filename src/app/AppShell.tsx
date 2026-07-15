@@ -8,6 +8,7 @@ import { useMicrophoneAssignments } from "../microphones/useMicrophoneAssignment
 import { useMicrophoneChannels } from "../microphones/useMicrophoneChannels";
 import { useMicrophoneRecovery } from "../microphones/useMicrophoneRecovery";
 import { BottomMediaBar } from "../player/BottomMediaBar";
+import type { PerformanceController } from "../performance/usePerformance";
 import type { ParticipantCommitProjection } from "../session-singers/types";
 import { useParticipantCommitDiagnostics } from "../session-singers/useParticipantCommitDiagnostics";
 import { SyncDialog } from "../sync/SyncDialog";
@@ -30,6 +31,7 @@ export function AppShell({
   activeView,
   audioPlayer,
   mediaLibrary,
+  performance,
   onCreateSingerWithMicrophone,
   onRemoveSinger,
   onRenameSinger,
@@ -43,6 +45,7 @@ export function AppShell({
   activeView: TabDefinition;
   audioPlayer: AudioPlayer;
   mediaLibrary: ReturnType<typeof useMediaLibrary>;
+  performance: PerformanceController;
   onCreateSingerWithMicrophone: (
     requestId: string,
     displayName: string,
@@ -133,6 +136,7 @@ export function AppShell({
             audioPlayer={audioPlayer}
             lyrics={lyrics}
             mediaLibrary={mediaLibrary}
+            performance={performance}
             microphones={microphones}
             microphoneAssignments={microphoneAssignments}
             microphoneChannels={microphoneChannels}
@@ -175,6 +179,7 @@ function MainContent({
   audioPlayer,
   lyrics,
   mediaLibrary,
+  performance,
   microphones,
   microphoneAssignments,
   microphoneChannels,
@@ -189,6 +194,7 @@ function MainContent({
   audioPlayer: AudioPlayer;
   lyrics: ReturnType<typeof useSongLyrics>;
   mediaLibrary: ReturnType<typeof useMediaLibrary>;
+  performance: PerformanceController;
   microphones: ReturnType<typeof useLocalMicrophones>;
   microphoneAssignments: ReturnType<typeof useMicrophoneAssignments>;
   microphoneChannels: ReturnType<typeof useMicrophoneChannels>;
@@ -202,7 +208,12 @@ function MainContent({
 }) {
   if (view.id === "performance") {
     return (
-      <PerformWorkspace audioPlayer={audioPlayer} lyricOffsetMs={lyricOffsetMs} lyrics={lyrics} />
+      <PerformWorkspace
+        audioPlayer={audioPlayer}
+        lyricOffsetMs={lyricOffsetMs}
+        lyrics={lyrics}
+        performance={performance}
+      />
     );
   }
 
@@ -233,6 +244,7 @@ function MainContent({
         discovery={microphones}
         participantCommitDiagnostics={participantCommitDiagnostics}
         mediaLibrary={mediaLibrary}
+        performance={performance}
         recovery={microphoneRecovery}
         singers={singers}
         assignments={microphoneAssignments}

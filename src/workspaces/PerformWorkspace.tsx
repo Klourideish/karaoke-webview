@@ -5,6 +5,8 @@ import { presentationLineProgress, type LyricPresentationRow } from "../lyricPre
 import { lyricFragmentProgress } from "../lyricTiming";
 import type { LyricLine, LyricSegment } from "../lyrics";
 import { playbackStatusLabel } from "../player/playbackFormatting";
+import type { PerformanceDetailsProjection } from "../performance/types";
+import type { PerformanceController } from "../performance/usePerformance";
 import { useLyricPlaybackClock } from "../useLyricPlaybackClock";
 import type { SongLyricsState } from "../useSongLyrics";
 
@@ -12,10 +14,12 @@ export function PerformWorkspace({
   audioPlayer,
   lyricOffsetMs,
   lyrics,
+  performance,
 }: {
   audioPlayer: AudioPlayer;
   lyricOffsetMs: number;
   lyrics: SongLyricsState;
+  performance: PerformanceController;
 }) {
   const currentSong = audioPlayer.currentSong;
   const lyricSnapshot = useLyricPlaybackClock({
@@ -38,6 +42,18 @@ export function PerformWorkspace({
 
       <section className="performance-stage" aria-labelledby="performance-stage-title">
         <h3 id="performance-stage-title">Lyrics presentation</h3>
+        {performance.projection.active ? (
+          <div className="performance-authority-summary" aria-live="polite">
+            <strong>{performance.projection.active.performer.displayName}</strong>
+            <span>{performance.projection.active.song.title}</span>
+            <span>{performanceStatus(performance.projection.active)}</span>
+          </div>
+        ) : null}
+        {performance.error ? (
+          <p className="lyric-error" role="alert">
+            {performance.error}
+          </p>
+        ) : null}
         {currentSong ? (
           <div className="lyric-display" aria-live="polite">
             <p className="lyric-song-status">
@@ -81,6 +97,18 @@ export function PerformWorkspace({
       </section>
     </section>
   );
+}
+
+function performanceStatus(active: PerformanceDetailsProjection) {
+  if (active.state === "countdown") {
+    if (active.playback.startupPending) return "Starting playback";
+    return `Starting in ${Math.max(0, Math.ceil((active.countdownRemainingMs ?? 0) / 1_000))}`;
+  }
+  if (active.state === "results") {
+    return "Results";
+  }
+  if (active.failure) return active.failure.message;
+  return active.state.charAt(0).toUpperCase() + active.state.slice(1);
 }
 
 function PresentationLyricRow({

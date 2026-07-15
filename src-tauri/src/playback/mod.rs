@@ -7,10 +7,10 @@ mod tests;
 use tauri::{Emitter, Manager};
 
 pub(crate) use coordinator::HostPlaybackCoordinator;
-use models::{
+pub(crate) use models::{
     PlaybackError, PlaybackErrorCode, PlaybackFailureKind, PlaybackFailureReportRequest,
     PlaybackMutationRequest, PlaybackProjection, PlaybackReportRequest, PlaybackSongProjection,
-    RequestSongPlayback,
+    PlaybackState, RequestSongPlayback,
 };
 
 pub(crate) const PLAYBACK_PROJECTION_EVENT: &str = "playback-projection-changed";
@@ -28,9 +28,17 @@ pub(crate) fn request_song_playback(
     request: RequestSongPlayback,
     coordinator: tauri::State<'_, HostPlaybackCoordinator>,
 ) -> Result<PlaybackProjection, PlaybackError> {
+    request_song_playback_owned(&app, &coordinator, request)
+}
+
+pub(crate) fn request_song_playback_owned(
+    app: &tauri::AppHandle,
+    coordinator: &HostPlaybackCoordinator,
+    request: RequestSongPlayback,
+) -> Result<PlaybackProjection, PlaybackError> {
     let song_id = request.song_id.clone();
     let projection = coordinator.request_start(request, || {
-        let resolved = crate::media_library::resolve_indexed_song(&app, &song_id)
+        let resolved = crate::media_library::resolve_indexed_song(app, &song_id)
             .map_err(map_song_lookup_error)?;
         app.asset_protocol_scope()
             .allow_file(&resolved.audio_path)
@@ -47,7 +55,7 @@ pub(crate) fn request_song_playback(
             audio_path: crate::media_library::path_to_string(&resolved.audio_path),
         })
     })?;
-    publish(&app, &projection);
+    publish(app, &projection);
     Ok(projection)
 }
 
@@ -75,7 +83,15 @@ pub(crate) fn request_playback_stop(
     request: PlaybackMutationRequest,
     coordinator: tauri::State<'_, HostPlaybackCoordinator>,
 ) -> Result<PlaybackProjection, PlaybackError> {
-    publish_result(&app, coordinator.request_stop(request))
+    request_playback_stop_owned(&app, &coordinator, request)
+}
+
+pub(crate) fn request_playback_stop_owned(
+    app: &tauri::AppHandle,
+    coordinator: &HostPlaybackCoordinator,
+    request: PlaybackMutationRequest,
+) -> Result<PlaybackProjection, PlaybackError> {
+    publish_result(app, coordinator.request_stop(request))
 }
 
 #[tauri::command]
@@ -84,7 +100,7 @@ pub(crate) fn report_playback_started(
     request: PlaybackReportRequest,
     coordinator: tauri::State<'_, HostPlaybackCoordinator>,
 ) -> Result<PlaybackProjection, PlaybackError> {
-    publish_result(&app, coordinator.report_started(&request.attempt_id))
+    publish_playback_report(&app, coordinator.report_started(&request.attempt_id))
 }
 
 #[tauri::command]
@@ -93,7 +109,7 @@ pub(crate) fn report_playback_completed(
     request: PlaybackReportRequest,
     coordinator: tauri::State<'_, HostPlaybackCoordinator>,
 ) -> Result<PlaybackProjection, PlaybackError> {
-    publish_result(&app, coordinator.report_completed(&request.attempt_id))
+    publish_playback_report(&app, coordinator.report_completed(&request.attempt_id))
 }
 
 #[tauri::command]
@@ -106,7 +122,7 @@ pub(crate) fn report_playback_failed(
         .message
         .filter(|message| !message.trim().is_empty())
         .unwrap_or_else(|| "Playback could not start or continue.".to_string());
-    publish_result(
+    publish_playback_report(
         &app,
         coordinator.report_failed(
             &request.attempt_id,
@@ -117,6 +133,15 @@ pub(crate) fn report_playback_failed(
             message,
         ),
     )
+}
+
+fn publish_playback_report(
+    app: &tauri::AppHandle,
+    result: Result<PlaybackProjection, PlaybackError>,
+) -> Result<PlaybackProjection, PlaybackError> {
+    let projection = publish_result(app, result)?;
+    crate::performance::observe_playback_projection(app, &projection);
+    Ok(projection)
 }
 
 fn publish_result(

@@ -3,6 +3,7 @@ import { AppShell } from "./app/AppShell";
 import { tabs, type AppTab } from "./app/appTabs";
 import { useAudioPlayer } from "./audioPlayer";
 import { useMediaLibrary } from "./media-library/useMediaLibrary";
+import { usePerformance } from "./performance/usePerformance";
 import { useSessionSingers } from "./session-singers/useSessionSingers";
 
 export function App() {
@@ -10,6 +11,7 @@ export function App() {
   const sessionSingers = useSessionSingers();
   const mediaLibrary = useMediaLibrary();
   const audioPlayer = useAudioPlayer();
+  const performance = usePerformance();
   const activeView = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
 
   return (
@@ -18,6 +20,7 @@ export function App() {
       activeView={activeView}
       audioPlayer={audioPlayer}
       mediaLibrary={mediaLibrary}
+      performance={performance}
       onCreateSingerWithMicrophone={sessionSingers.createWithMicrophone}
       onRemoveSinger={sessionSingers.remove}
       onRenameSinger={sessionSingers.rename}

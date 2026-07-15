@@ -13,6 +13,7 @@ Phone interaction is a core product direction, not an optional add-on. Sequence 
 - normalized inline TTML spacing and deterministic half-open lyric timing
 - session-local signed lyric offset with operator controls
 - Host-owned playback authority with stable indexed song lookup and attempt-scoped adapter reports
+- Host-owned Performance authority with RFC-P-003 lifecycle, readiness, countdown, playback linkage, and results deadline
 - Host-owned session singer registry and atomic participant commit foundation
 - Host Sync dialog and physical microphone onboarding through the atomic participant commit
 
@@ -30,7 +31,7 @@ Phone interaction is a core product direction, not an optional add-on. Sequence 
 - client/protocol proof of concept
 - development QR pairing and participant setup contract
 - Android microphone relay proof of concept in its separate repository
-- queue and performance orchestration
+- Host-authoritative queue orchestration over the completed Performance boundary
 - history/database foundation
 - scoring foundation
 - multi-display operator/TV separation

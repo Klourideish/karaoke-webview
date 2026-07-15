@@ -15,6 +15,7 @@ import type { DiagnosticCaptureSnapshot } from "./microphones/diagnosticCapture"
 import type { DevelopmentPairingProjection, PairingOfferProjection } from "./pairing/types";
 import type { ParticipantCommitDiagnosticProjection } from "./session-singers/types";
 import { idlePlaybackProjection, type PlaybackProjection } from "./playback/types";
+import { emptyPerformanceProjection, type PerformanceProjection } from "./performance/types";
 
 const tauriMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -267,6 +268,7 @@ const pendingDevelopmentPairingProjection: DevelopmentPairingProjection = {
 let sessionSingerState: typeof initialSessionSingers = [];
 let nextSessionSingerNumber = 1;
 let playbackProjectionState: PlaybackProjection = structuredClone(idlePlaybackProjection);
+let performanceProjectionState: PerformanceProjection = structuredClone(emptyPerformanceProjection);
 let playbackSongs: MediaSong[] = [];
 let playbackLyrics: LyricDocument;
 
@@ -494,12 +496,68 @@ type PlaybackMockArgs = {
     requestId?: string;
     songId?: string;
     attemptId?: string;
+    performanceId?: string;
     kind?: "start-rejected" | "media-error";
     message?: string;
   };
 };
 
 function mockPlaybackInvoke(command: string, args?: PlaybackMockArgs) {
+  if (command === "get_performance_projection") {
+    return Promise.resolve(structuredClone(performanceProjectionState));
+  }
+
+  if (command === "create_performance") {
+    const singer = sessionSingerState.find((candidate) => candidate.id === args?.request?.singerId);
+    const song = playbackSongs.find((candidate) => candidate.id === args?.request?.songId);
+    if (!singer || !song) {
+      return Promise.reject({ reasonCode: "invalid-state", message: "Singer or song missing." });
+    }
+    performanceProjectionState = {
+      revision: performanceProjectionState.revision + 1,
+      active: {
+        id: "performance-1",
+        state: "countdown",
+        performer: { id: singer.id, displayName: singer.displayName },
+        song: { id: song.id, title: song.title, artist: song.artist },
+        countdownDeadlineUnixMs: Date.now() + 3_000,
+        countdownRemainingMs: 3_000,
+        resultsDeadlineUnixMs: null,
+        resultsRemainingMs: null,
+        readiness: readyPerformanceMicrophoneReadiness,
+        playback: { attemptId: null, state: "idle", startupPending: false },
+        terminalReason: null,
+        failure: null,
+      },
+      diagnostics: {
+        ...performanceProjectionState.diagnostics,
+        lastTransition: "Ready->Countdown",
+      },
+    };
+    return Promise.resolve(structuredClone(performanceProjectionState));
+  }
+
+  if (command === "cancel_preparation" || command === "skip_performance") {
+    if (!performanceProjectionState.active) {
+      return Promise.reject({ reasonCode: "performance-not-found", message: "No Performance." });
+    }
+    performanceProjectionState = {
+      ...performanceProjectionState,
+      revision: performanceProjectionState.revision + 1,
+      active: {
+        ...performanceProjectionState.active,
+        state: "stopped",
+        terminalReason:
+          command === "cancel_preparation" ? "cancelled-before-playback" : "skipped-by-operator",
+      },
+      diagnostics: {
+        ...performanceProjectionState.diagnostics,
+        lastTransition: "Countdown->Stopped",
+      },
+    };
+    return Promise.resolve(structuredClone(performanceProjectionState));
+  }
+
   if (command === "get_playback_projection") {
     return Promise.resolve(structuredClone(playbackProjectionState));
   }
@@ -968,6 +1026,7 @@ beforeEach(() => {
   tauriEventMocks.listen.mockReset();
   tauriEventMocks.listen.mockResolvedValue(() => undefined);
   playbackProjectionState = structuredClone(idlePlaybackProjection);
+  performanceProjectionState = structuredClone(emptyPerformanceProjection);
   playbackSongs = populatedScanResult.songs;
   playbackLyrics = populatedLyricDocument;
   sessionSingerState = [];
@@ -4375,5 +4434,75 @@ describe("Singer shell", () => {
     expect(
       tauriMocks.invoke.mock.calls.filter(([command]) => command === "create_session_singer"),
     ).toHaveLength(0);
+  });
+
+  it("creates a Host-owned Performance by singer and stable song ID", async () => {
+    const user = userEvent.setup();
+    sessionSingerState = initialSessionSingers.map((singer) => ({ ...singer }));
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openDeveloperWorkspace(user);
+
+    await user.selectOptions(await screen.findByLabelText("Performer"), "singer-1");
+    await user.selectOptions(screen.getByLabelText("Song"), "song-a");
+    await user.click(screen.getByRole("button", { name: "Create Performance" }));
+
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("create_performance", {
+        request: {
+          requestId: expect.any(String),
+          singerId: "singer-1",
+          songId: "song-a",
+        },
+      }),
+    );
+    const request = tauriMocks.invoke.mock.calls.find(
+      ([command]) => command === "create_performance",
+    )?.[1]?.request;
+    expect(request).not.toHaveProperty("audioPath");
+    expect(request).not.toHaveProperty("lyricPath");
+
+    await user.click(screen.getByRole("button", { name: "Performance" }));
+    expect(await screen.findByText("Dad")).toBeInTheDocument();
+    expect(screen.getByText("Hey Jude")).toBeInTheDocument();
+    expect(screen.getByText("Starting in 3")).toBeInTheDocument();
+  });
+
+  it("does not duplicate a Performance mutation under StrictMode", async () => {
+    const user = userEvent.setup();
+    sessionSingerState = initialSessionSingers.map((singer) => ({ ...singer }));
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    renderStrictApp();
+    await openDeveloperWorkspace(user);
+
+    await user.selectOptions(await screen.findByLabelText("Performer"), "singer-1");
+    await user.selectOptions(screen.getByLabelText("Song"), "song-a");
+    await user.click(screen.getByRole("button", { name: "Create Performance" }));
+
+    await waitFor(() =>
+      expect(
+        tauriMocks.invoke.mock.calls.filter(([command]) => command === "create_performance"),
+      ).toHaveLength(1),
+    );
+  });
+
+  it("requests preparation cancellation through the Host projection boundary", async () => {
+    const user = userEvent.setup();
+    sessionSingerState = initialSessionSingers.map((singer) => ({ ...singer }));
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openDeveloperWorkspace(user);
+    await user.selectOptions(await screen.findByLabelText("Performer"), "singer-1");
+    await user.selectOptions(screen.getByLabelText("Song"), "song-a");
+    await user.click(screen.getByRole("button", { name: "Create Performance" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel preparation" }));
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("cancel_preparation", {
+      request: {
+        requestId: expect.any(String),
+        performanceId: "performance-1",
+      },
+    });
+    expect(await screen.findByText(/Lifecycle: stopped/)).toBeInTheDocument();
   });
 });

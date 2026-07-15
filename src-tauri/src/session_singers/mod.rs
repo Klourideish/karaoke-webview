@@ -47,7 +47,14 @@ pub(crate) fn remove_session_singer(
         '_,
         std::sync::Arc<crate::development_protocol::DevelopmentProtocolManager>,
     >,
+    performance: tauri::State<'_, std::sync::Arc<crate::performance::HostPerformanceCoordinator>>,
 ) -> Result<SessionSingerProjection, SessionSingerError> {
+    if performance.has_active_singer(&singer_id) {
+        return Err(SessionSingerError::new(
+            SessionSingerErrorCode::SingerInUse,
+            "Stop the singer's current Performance before removing the singer.",
+        ));
+    }
     remove_session_singer_owned(
         &singer_id,
         &registry,

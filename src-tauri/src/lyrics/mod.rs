@@ -17,6 +17,14 @@ pub fn parse_song_lyrics(app: tauri::AppHandle, song_id: String) -> Result<Lyric
     parse_song_lyrics_path(&song_id, &resolved.lyric_path).map_err(|error| error.to_string())
 }
 
+pub(crate) fn validate_song_lyrics(app: &tauri::AppHandle, song_id: &str) -> Result<(), String> {
+    let resolved =
+        crate::media_library::resolve_indexed_song(app, song_id).map_err(|error| error.message)?;
+    parse_song_lyrics_path(song_id, &resolved.lyric_path)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
 #[cfg(test)]
 fn parse_song_lyrics_for_settings(
     settings_path: &Path,
