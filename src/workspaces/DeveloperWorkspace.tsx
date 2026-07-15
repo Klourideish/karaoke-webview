@@ -171,13 +171,45 @@ export function DeveloperWorkspace({
                   className="secondary-button"
                   key={song.id}
                   type="button"
-                  onClick={() => void audioPlayer.loadSong(song)}
+                  onClick={() => void audioPlayer.loadSong(song.id)}
                 >
                   Test playback: {song.title}
                 </button>
               ))}
+              <button
+                className="secondary-button"
+                disabled={!audioPlayer.projection.attemptId}
+                type="button"
+                onClick={() => void audioPlayer.stop()}
+              >
+                Stop playback
+              </button>
             </div>
           ) : null}
+          <DiagnosticText>
+            <p>
+              Playback: {audioPlayer.projection.state} / Desired adapter action:{" "}
+              {audioPlayer.projection.desiredAction}
+            </p>
+            <p>
+              Attempt: {audioPlayer.projection.attemptId ?? "None"} / Song:{" "}
+              {audioPlayer.projection.song?.id ?? "None"}
+            </p>
+            <p>
+              Last adapter event: {audioPlayer.projection.diagnostics.lastAdapterEvent ?? "None"} /
+              Stale events: {audioPlayer.projection.diagnostics.staleEventCount}
+            </p>
+            <p>
+              Idempotency hits: {audioPlayer.projection.diagnostics.idempotencyHitCount} /
+              Conflicts: {audioPlayer.projection.diagnostics.idempotencyConflictCount}
+            </p>
+            {audioPlayer.projection.failureMessage ? (
+              <p>
+                Last failure: {audioPlayer.projection.failureMessage} ({" "}
+                {audioPlayer.projection.failureReason ?? "unknown"})
+              </p>
+            ) : null}
+          </DiagnosticText>
         </section>
         <section className="developer-panel" aria-labelledby="development-pairing-heading">
           <div>

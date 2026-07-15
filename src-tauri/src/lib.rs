@@ -5,6 +5,7 @@ mod lyrics;
 mod media_library;
 mod microphones;
 mod participant_commit;
+mod playback;
 mod session_singers;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -34,6 +35,7 @@ pub fn run() {
         .manage(session_singers::SessionSingerRegistry::default())
         .manage(participant_commit::ParticipantCommitCoordinator::default())
         .manage(media_library::MediaLibraryRefreshCoordinator::default())
+        .manage(playback::HostPlaybackCoordinator::default())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             capture::diagnostic_capture_snapshot,
@@ -69,7 +71,14 @@ pub fn run() {
             microphones::list_microphone_assignments,
             microphones::list_microphone_waiting_states,
             lyrics::parse_song_lyrics,
-            media_library::resolve_audio_source,
+            playback::get_playback_projection,
+            playback::request_song_playback,
+            playback::request_playback_pause,
+            playback::request_playback_resume,
+            playback::request_playback_stop,
+            playback::report_playback_started,
+            playback::report_playback_completed,
+            playback::report_playback_failed,
             media_library::refresh_media_library,
             microphones::remove_microphone_channel,
             session_singers::remove_session_singer,

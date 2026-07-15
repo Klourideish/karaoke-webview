@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseSongLyrics, type LyricDocument } from "./lyrics";
-import type { MediaSong } from "./media-library/types";
+import type { PlaybackSongProjection } from "./playback/types";
 
 export type SongLyricsState = {
   document: LyricDocument | null;
@@ -9,7 +9,7 @@ export type SongLyricsState = {
   songId: string | null;
 };
 
-export function useSongLyrics(song: MediaSong | null): SongLyricsState {
+export function useSongLyrics(song: PlaybackSongProjection | null): SongLyricsState {
   const [state, setState] = useState<SongLyricsState>({
     document: null,
     error: null,
@@ -17,12 +17,13 @@ export function useSongLyrics(song: MediaSong | null): SongLyricsState {
     songId: null,
   });
   const requestIdRef = useRef(0);
+  const songId = song?.id ?? null;
 
   useEffect(() => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
 
-    if (!song) {
+    if (!songId) {
       setState({
         document: null,
         error: null,
@@ -36,19 +37,19 @@ export function useSongLyrics(song: MediaSong | null): SongLyricsState {
       document: null,
       error: null,
       isLoading: true,
-      songId: song.id,
+      songId,
     });
 
-    parseSongLyrics(song)
+    parseSongLyrics(songId)
       .then((document) => {
-        if (requestIdRef.current !== requestId || document.sourceSongId !== song.id) {
+        if (requestIdRef.current !== requestId || document.sourceSongId !== songId) {
           return;
         }
         setState({
           document,
           error: null,
           isLoading: false,
-          songId: song.id,
+          songId,
         });
       })
       .catch((error: unknown) => {
@@ -59,10 +60,10 @@ export function useSongLyrics(song: MediaSong | null): SongLyricsState {
           document: null,
           error: errorToMessage(error, "Could not load lyrics for this song."),
           isLoading: false,
-          songId: song.id,
+          songId,
         });
       });
-  }, [song]);
+  }, [songId]);
 
   return useMemo(() => state, [state]);
 }

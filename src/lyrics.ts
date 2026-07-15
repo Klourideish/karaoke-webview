@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { MediaSong } from "./media-library/types";
 
 export type LyricTimingGranularity = "text" | "word" | "syllable";
 
@@ -37,6 +36,6 @@ export type LyricDocument = {
   warnings: LyricWarning[];
 };
 
-export function parseSongLyrics(song: MediaSong): Promise<LyricDocument> {
-  return invoke<LyricDocument>("parse_song_lyrics", { song });
+export function parseSongLyrics(songId: string): Promise<LyricDocument> {
+  return invoke<LyricDocument>("parse_song_lyrics", { songId });
 }

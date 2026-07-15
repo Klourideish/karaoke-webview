@@ -87,6 +87,7 @@ pub struct LibraryIndexLoadResult {
     pub message: Option<String>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedAudioSource {

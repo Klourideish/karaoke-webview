@@ -7,7 +7,7 @@ use super::{
         load_library_index_for_root, write_library_index_atomically, write_library_settings,
         LIBRARY_INDEX_SCHEMA_VERSION,
     },
-    playback::resolve_audio_source_for_song,
+    playback::{resolve_audio_source_for_song, resolve_indexed_song_for_paths},
     scanner::{
         build_scan_result, path_to_string, scan_media_library_path, song_id, CandidateFile,
         CandidateKind, ScanAccumulator,
@@ -66,6 +66,75 @@ fn write_settings(path: &Path, root_path: &Path) {
         },
     )
     .unwrap();
+}
+
+#[test]
+fn authoritative_song_id_lookup_resolves_the_current_accepted_index() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().join("Music");
+    let settings = temp_dir.path().join("settings.json");
+    let index = temp_dir.path().join("library-index.json");
+    write_empty_file(&root.join("Artist").join("Artist - Song.opus"));
+    write_empty_file(&root.join("Artist").join("Artist - Song.ttml"));
+    let canonical_root = root.canonicalize().unwrap();
+    let scan_result = sample_scan_result(&canonical_root);
+    let expected_id = scan_result.songs[0].id.clone();
+    write_settings(&settings, &canonical_root);
+    write_library_index_atomically(&index, &LibraryIndex::from(scan_result)).unwrap();
+
+    let resolved = resolve_indexed_song_for_paths(&settings, &index, &expected_id).unwrap();
+
+    assert_eq!(resolved.song.id, expected_id);
+    assert!(resolved.audio_path.ends_with("Artist - Song.opus"));
+    assert!(resolved.lyric_path.ends_with("Artist - Song.ttml"));
+}
+
+#[test]
+fn authoritative_song_id_lookup_rejects_missing_and_stale_songs() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().join("Music");
+    let settings = temp_dir.path().join("settings.json");
+    let index = temp_dir.path().join("library-index.json");
+    write_empty_file(&root.join("Artist").join("Artist - Song.opus"));
+    write_empty_file(&root.join("Artist").join("Artist - Song.ttml"));
+    let canonical_root = root.canonicalize().unwrap();
+    let scan_result = sample_scan_result(&canonical_root);
+    let indexed_id = scan_result.songs[0].id.clone();
+    write_settings(&settings, &canonical_root);
+    write_library_index_atomically(&index, &LibraryIndex::from(scan_result)).unwrap();
+
+    let missing = resolve_indexed_song_for_paths(&settings, &index, "missing-song").unwrap_err();
+    assert_eq!(
+        missing.reason_code,
+        super::playback::IndexedSongLookupErrorCode::SongNotFound
+    );
+
+    fs::remove_file(root.join("Artist").join("Artist - Song.opus")).unwrap();
+    let stale = resolve_indexed_song_for_paths(&settings, &index, &indexed_id).unwrap_err();
+    assert_eq!(
+        stale.reason_code,
+        super::playback::IndexedSongLookupErrorCode::SongUnavailable
+    );
+}
+
+#[test]
+fn authoritative_song_lookup_preserves_identity_after_equivalent_rescan() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().join("Music");
+    let settings = temp_dir.path().join("settings.json");
+    let index = temp_dir.path().join("library-index.json");
+    write_empty_file(&root.join("Artist").join("Artist - Song.opus"));
+    write_empty_file(&root.join("Artist").join("Artist - Song.ttml"));
+    let canonical_root = root.canonicalize().unwrap();
+    write_settings(&settings, &canonical_root);
+    let first = scan_media_library_path(root.clone()).unwrap();
+    let song_id = first.songs[0].id.clone();
+    write_library_index_atomically(&index, &LibraryIndex::from(first)).unwrap();
+    let rescanned = scan_media_library_path(root.clone()).unwrap();
+    write_library_index_atomically(&index, &LibraryIndex::from(rescanned)).unwrap();
+
+    let resolved = resolve_indexed_song_for_paths(&settings, &index, &song_id).unwrap();
+    assert_eq!(resolved.song.id, song_id);
 }
 
 fn sample_song(root_path: &Path, stem: &str) -> MediaSong {

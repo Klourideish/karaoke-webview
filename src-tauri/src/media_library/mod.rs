@@ -4,15 +4,14 @@ mod playback;
 mod refresh;
 mod scanner;
 
-use models::{LibraryIndex, LibraryScanResult, LibrarySettings, MediaSong, ResolvedAudioSource};
+use models::{LibraryIndex, LibraryScanResult, LibrarySettings};
 use persistence::{
     clear_library_index_for_root, library_index_path, load_library_index_for_root,
     read_library_settings, same_root, write_library_index_atomically, write_library_settings,
 };
-use playback::resolve_audio_source_for_song;
-use scanner::{path_to_string, scan_media_library_path};
+pub(crate) use scanner::path_to_string;
+use scanner::scan_media_library_path;
 use std::path::PathBuf;
-use tauri::Manager;
 
 pub(crate) use refresh::MediaLibraryRefreshCoordinator;
 
@@ -123,24 +122,28 @@ pub(crate) fn refresh_media_library(
     )
 }
 
-#[tauri::command]
-pub fn resolve_audio_source(
-    app: tauri::AppHandle,
-    song: MediaSong,
-) -> Result<ResolvedAudioSource, String> {
-    let resolved = resolve_audio_source_for_song(&settings_path(&app)?, song)
-        .map_err(|error| error.to_string())?;
-    app.asset_protocol_scope()
-        .allow_file(&resolved.audio_path)
-        .map_err(|error| {
-            eprintln!("Could not allow audio file through asset protocol: {error}");
-            "Could not access this audio file.".to_string()
-        })?;
-    Ok(resolved)
-}
-
 #[cfg(test)]
 mod tests;
 
 pub(crate) use persistence::settings_path;
+#[cfg(test)]
 pub(crate) use playback::resolve_lyric_source_for_song;
+pub(crate) use playback::{
+    IndexedPlaybackSong, IndexedSongLookupError, IndexedSongLookupErrorCode,
+};
+pub(crate) fn resolve_indexed_song(
+    app: &tauri::AppHandle,
+    song_id: &str,
+) -> Result<IndexedPlaybackSong, IndexedSongLookupError> {
+    playback::resolve_indexed_song_for_paths(
+        &settings_path(app).map_err(|message| IndexedSongLookupError {
+            reason_code: IndexedSongLookupErrorCode::IndexUnavailable,
+            message,
+        })?,
+        &persistence::library_index_path(app).map_err(|message| IndexedSongLookupError {
+            reason_code: IndexedSongLookupErrorCode::IndexUnavailable,
+            message,
+        })?,
+        song_id,
+    )
+}

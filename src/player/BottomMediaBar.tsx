@@ -15,7 +15,11 @@ export function BottomMediaBar({ audioPlayer }: { audioPlayer: AudioPlayer }) {
         aria-label={isPlaying ? "Pause" : "Play"}
         onClick={() => {
           if (isPlaying) {
-            audioPlayer.pause();
+            void audioPlayer.pause();
+          } else if (audioPlayer.status === "paused") {
+            void audioPlayer.play();
+          } else if (audioPlayer.currentSong) {
+            void audioPlayer.loadSong(audioPlayer.currentSong.id);
           } else {
             void audioPlayer.play();
           }

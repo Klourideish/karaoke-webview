@@ -1,10 +1,96 @@
 use crate::media_library::{
-    models::{MediaSong, ResolvedAudioSource},
-    persistence::{read_library_settings, SettingsError},
+    models::{LibraryIndexLoadStatus, MediaSong},
+    persistence::{load_library_index_for_root, read_library_settings, SettingsError},
     scanner::{path_to_string, song_id},
 };
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use crate::media_library::models::ResolvedAudioSource;
+
+#[derive(Debug)]
+pub(crate) struct IndexedPlaybackSong {
+    pub(crate) song: MediaSong,
+    pub(crate) audio_path: PathBuf,
+    pub(crate) lyric_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IndexedSongLookupErrorCode {
+    LibraryNotSelected,
+    IndexUnavailable,
+    SongNotFound,
+    SongUnavailable,
+}
+
+#[derive(Debug)]
+pub(crate) struct IndexedSongLookupError {
+    pub(crate) reason_code: IndexedSongLookupErrorCode,
+    pub(crate) message: String,
+}
+
+impl IndexedSongLookupError {
+    fn new(reason_code: IndexedSongLookupErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            reason_code,
+            message: message.into(),
+        }
+    }
+}
+
+pub(crate) fn resolve_indexed_song_for_paths(
+    settings_path: &Path,
+    index_path: &Path,
+    song_id: &str,
+) -> Result<IndexedPlaybackSong, IndexedSongLookupError> {
+    let settings = read_library_settings(settings_path).map_err(|_| {
+        IndexedSongLookupError::new(
+            IndexedSongLookupErrorCode::IndexUnavailable,
+            "Could not read the selected library.",
+        )
+    })?;
+    let root_path = settings.library_root.ok_or_else(|| {
+        IndexedSongLookupError::new(
+            IndexedSongLookupErrorCode::LibraryNotSelected,
+            "Choose a library location before starting playback.",
+        )
+    })?;
+    let loaded = load_library_index_for_root(index_path, &root_path).map_err(|_| {
+        IndexedSongLookupError::new(
+            IndexedSongLookupErrorCode::IndexUnavailable,
+            "The current library index could not be read.",
+        )
+    })?;
+    if loaded.status != LibraryIndexLoadStatus::Hit {
+        return Err(IndexedSongLookupError::new(
+            IndexedSongLookupErrorCode::IndexUnavailable,
+            "Refresh the library before starting playback.",
+        ));
+    }
+    let song = loaded
+        .scan_result
+        .and_then(|result| result.songs.into_iter().find(|song| song.id == song_id))
+        .ok_or_else(|| {
+            IndexedSongLookupError::new(
+                IndexedSongLookupErrorCode::SongNotFound,
+                "This song is no longer in the current library.",
+            )
+        })?;
+    let (song, _root_path, audio_path, lyric_path) = validate_song_paths(settings_path, song)
+        .map_err(|_| {
+            IndexedSongLookupError::new(
+                IndexedSongLookupErrorCode::SongUnavailable,
+                "This song's accepted media files are no longer available.",
+            )
+        })?;
+    Ok(IndexedPlaybackSong {
+        song,
+        audio_path,
+        lyric_path,
+    })
+}
+
+#[cfg(test)]
 pub(crate) fn resolve_audio_source_for_song(
     settings_path: &Path,
     song: MediaSong,
@@ -17,6 +103,7 @@ pub(crate) fn resolve_audio_source_for_song(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_lyric_source_for_song(
     settings_path: &Path,
     song: MediaSong,

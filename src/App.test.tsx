@@ -14,11 +14,13 @@ import type {
 import type { DiagnosticCaptureSnapshot } from "./microphones/diagnosticCapture";
 import type { DevelopmentPairingProjection, PairingOfferProjection } from "./pairing/types";
 import type { ParticipantCommitDiagnosticProjection } from "./session-singers/types";
+import { idlePlaybackProjection, type PlaybackProjection } from "./playback/types";
 
 const tauriMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   open: vi.fn(),
 }));
+const tauriEventMocks = vi.hoisted(() => ({ listen: vi.fn() }));
 
 let nextAnimationFrameId = 1;
 let animationFrameCallbacks = new Map<number, FrameRequestCallback>();
@@ -30,6 +32,10 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: tauriMocks.open,
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: tauriEventMocks.listen,
 }));
 
 const emptyScanResult: LibraryScanResult = {
@@ -260,6 +266,9 @@ const pendingDevelopmentPairingProjection: DevelopmentPairingProjection = {
 };
 let sessionSingerState: typeof initialSessionSingers = [];
 let nextSessionSingerNumber = 1;
+let playbackProjectionState: PlaybackProjection = structuredClone(idlePlaybackProjection);
+let playbackSongs: MediaSong[] = [];
+let playbackLyrics: LyricDocument;
 
 const disconnectedRecoveryState = {
   channelId: microphoneChannel.id,
@@ -479,6 +488,114 @@ const populatedLyricDocument: LyricDocument = {
   ],
 };
 
+type PlaybackMockArgs = {
+  songId?: string;
+  request?: {
+    requestId?: string;
+    songId?: string;
+    attemptId?: string;
+    kind?: "start-rejected" | "media-error";
+    message?: string;
+  };
+};
+
+function mockPlaybackInvoke(command: string, args?: PlaybackMockArgs) {
+  if (command === "get_playback_projection") {
+    return Promise.resolve(structuredClone(playbackProjectionState));
+  }
+
+  if (command === "request_song_playback") {
+    const song = playbackSongs.find((candidate) => candidate.id === args?.request?.songId);
+    if (!song) {
+      return Promise.reject({ reasonCode: "song-not-found", message: "Song not found." });
+    }
+    if (["starting", "playing", "paused"].includes(playbackProjectionState.state)) {
+      return Promise.reject({
+        reasonCode: "playback-already-active",
+        message: "Stop the current song before starting another one.",
+      });
+    }
+    const attemptNumber = Number(playbackProjectionState.attemptId?.split("-").at(-1) ?? 0) + 1;
+    playbackProjectionState = {
+      ...playbackProjectionState,
+      revision: playbackProjectionState.revision + 1,
+      state: "starting",
+      desiredAction: "start",
+      attemptId: `playback-attempt-${attemptNumber}`,
+      song: {
+        id: song.id,
+        title: song.title,
+        artist: song.artist,
+        audioPath: song.audioPath,
+      },
+      failureReason: null,
+      failureMessage: null,
+      diagnostics: {
+        ...playbackProjectionState.diagnostics,
+        lastAdapterEvent: "start-requested",
+      },
+    };
+    return Promise.resolve(structuredClone(playbackProjectionState));
+  }
+
+  if (command === "request_playback_pause") {
+    playbackProjectionState = transitionPlayback("paused", "pause", "pause-requested");
+    return Promise.resolve(structuredClone(playbackProjectionState));
+  }
+
+  if (command === "request_playback_resume") {
+    playbackProjectionState = transitionPlayback("starting", "resume", "resume-requested");
+    return Promise.resolve(structuredClone(playbackProjectionState));
+  }
+
+  if (command === "request_playback_stop") {
+    playbackProjectionState = transitionPlayback("stopped", "stop", "stop-requested");
+    return Promise.resolve(structuredClone(playbackProjectionState));
+  }
+
+  if (
+    command === "report_playback_started" ||
+    command === "report_playback_completed" ||
+    command === "report_playback_failed"
+  ) {
+    if (args?.request?.attemptId !== playbackProjectionState.attemptId) {
+      return Promise.reject({ reasonCode: "stale-attempt", message: "Stale playback attempt." });
+    }
+    if (command === "report_playback_started") {
+      playbackProjectionState = transitionPlayback("playing", "none", "adapter-started");
+    } else if (command === "report_playback_completed") {
+      playbackProjectionState = transitionPlayback("completed", "none", "adapter-completed");
+    } else {
+      playbackProjectionState = {
+        ...transitionPlayback("failed", "none", "adapter-failed"),
+        failureReason:
+          args?.request?.kind === "media-error" ? "media-failed" : "adapter-start-failed",
+        failureMessage: args?.request?.message ?? "Playback failed.",
+      };
+    }
+    return Promise.resolve(structuredClone(playbackProjectionState));
+  }
+
+  return null;
+}
+
+function transitionPlayback(
+  state: PlaybackProjection["state"],
+  desiredAction: PlaybackProjection["desiredAction"],
+  lastAdapterEvent: string,
+): PlaybackProjection {
+  return {
+    ...playbackProjectionState,
+    revision: playbackProjectionState.revision + 1,
+    state,
+    desiredAction,
+    diagnostics: {
+      ...playbackProjectionState.diagnostics,
+      lastAdapterEvent,
+    },
+  };
+}
+
 function mockInvokeWith({
   cacheResult = { status: "miss", scanResult: null, message: null },
   loadRoot = null,
@@ -494,13 +611,15 @@ function mockInvokeWith({
   scanResult?: LibraryScanResult;
   lyricResult?: LyricDocument;
 } = {}) {
+  playbackSongs = scanResult.songs.length > 0 ? scanResult.songs : populatedScanResult.songs;
+  playbackLyrics = lyricResult;
   let monitorStatus = idleDiagnosticMonitorStatus;
   let monitorDiagnostics = idleDiagnosticMonitorDiagnostics;
   tauriMocks.invoke.mockImplementation(
     (
       command: string,
       args?: {
-        song?: MediaSong;
+        songId?: string;
         sourceId?: string;
         singerId?: string;
         request?: {
@@ -508,9 +627,15 @@ function mockInvokeWith({
           displayName?: string | null;
           requestId?: string;
           sourceId?: string;
+          songId?: string;
+          attemptId?: string;
+          kind?: "start-rejected" | "media-error";
+          message?: string;
         };
       },
     ) => {
+      const playbackResponse = mockPlaybackInvoke(command, args);
+      if (playbackResponse) return playbackResponse;
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: loadRoot });
       }
@@ -531,19 +656,11 @@ function mockInvokeWith({
         return Promise.resolve();
       }
 
-      if (command === "resolve_audio_source") {
-        const firstSong = args?.song ?? scanResult.songs[0] ?? populatedScanResult.songs[0];
-        return Promise.resolve({
-          songId: firstSong.id,
-          audioPath: firstSong.audioPath,
-        });
-      }
-
       if (command === "parse_song_lyrics") {
-        const firstSong = args?.song ?? scanResult.songs[0] ?? populatedScanResult.songs[0];
+        const songId = args?.songId ?? playbackSongs[0].id;
         return Promise.resolve({
           ...lyricResult,
-          sourceSongId: firstSong.id,
+          sourceSongId: songId,
         });
       }
 
@@ -712,7 +829,16 @@ function mockInvokeWith({
   );
 }
 
-function mockSuccessfulLibraryInvoke(command: string) {
+function mockSuccessfulLibraryInvoke(command: string, args?: PlaybackMockArgs) {
+  const playbackResponse = mockPlaybackInvoke(command, args);
+  if (playbackResponse) return playbackResponse;
+
+  if (command === "parse_song_lyrics") {
+    return Promise.resolve({
+      ...playbackLyrics,
+      sourceSongId: args?.songId ?? playbackSongs[0].id,
+    });
+  }
   if (command === "load_library_settings") {
     return Promise.resolve({ libraryRoot: "C:\\Music" });
   }
@@ -839,6 +965,11 @@ beforeEach(() => {
   tauriMocks.invoke.mockReset();
   tauriMocks.open.mockReset();
   tauriMocks.open.mockResolvedValue(null);
+  tauriEventMocks.listen.mockReset();
+  tauriEventMocks.listen.mockResolvedValue(() => undefined);
+  playbackProjectionState = structuredClone(idlePlaybackProjection);
+  playbackSongs = populatedScanResult.songs;
+  playbackLyrics = populatedLyricDocument;
   sessionSingerState = [];
   nextSessionSingerNumber = 1;
   nextAnimationFrameId = 1;
@@ -920,9 +1051,23 @@ function runAnimationFrame(time = 0) {
   });
 }
 
-async function playSongFromLibrary(user: ReturnType<typeof userEvent.setup>, title: string) {
+async function playSongFromLibrary(
+  user: ReturnType<typeof userEvent.setup>,
+  title: string,
+  acknowledgeStart = true,
+) {
   await user.click(screen.getByRole("button", { name: "Developer" }));
+  const stop = screen.queryByRole("button", { name: "Stop playback" });
+  if (stop && !stop.hasAttribute("disabled")) {
+    await user.click(stop);
+  }
   await user.click(screen.getByRole("button", { name: `Test playback: ${title}` }));
+  const audio = getAudioElement();
+  await waitFor(() => expect(audio.dataset.songId).toBe(playbackProjectionState.song?.id));
+  if (acknowledgeStart) {
+    fireEvent.playing(audio);
+    await waitFor(() => expect(playbackProjectionState.state).toBe("playing"));
+  }
   await user.click(screen.getByRole("button", { name: "Library" }));
 }
 
@@ -3023,10 +3168,17 @@ describe("Library workspace", () => {
     await playSongFromLibrary(user, "Hey Jude");
 
     await waitFor(() =>
-      expect(tauriMocks.invoke).toHaveBeenCalledWith("resolve_audio_source", {
-        song: populatedScanResult.songs[0],
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("request_song_playback", {
+        request: {
+          requestId: expect.any(String),
+          songId: "song-a",
+        },
       }),
     );
+    const startCall = tauriMocks.invoke.mock.calls.find(
+      ([command]) => command === "request_song_playback",
+    );
+    expect(startCall?.[1]).not.toHaveProperty("request.audioPath");
     expect(screen.getByRole("region", { name: "Current song information" })).toHaveTextContent(
       "The Beatles - Hey Jude",
     );
@@ -3035,6 +3187,12 @@ describe("Library workspace", () => {
     );
     expect(getAudioElement().src).toContain("The%20Beatles%20-%20Hey%20Jude.opus");
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("report_playback_started", {
+      request: { attemptId: "playback-attempt-1" },
+    });
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "report_playback_started"),
+    ).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "Queue" })).toHaveTextContent(
       "No songs queued yet.",
@@ -3094,12 +3252,12 @@ describe("Library workspace", () => {
     await user.click(screen.getByRole("button", { name: "Pause" }));
     expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
 
-    fireEvent.pause(audio);
-    expect(screen.getByText("Paused")).toBeInTheDocument();
-    expect(within(transport).getByRole("button", { name: "Play" })).toBeInTheDocument();
+    expect(await screen.findByText("Paused")).toBeInTheDocument();
+    const playButton = within(transport).getByRole("button", { name: "Play" });
 
-    fireEvent.play(audio);
-    expect(within(transport).getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    await user.click(playButton);
+    fireEvent.playing(audio);
+    expect(await within(transport).findByRole("button", { name: "Pause" })).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("slider", { name: "Seek" }), { target: { value: "45" } });
     expect(audio.currentTime).toBe(45);
@@ -3108,8 +3266,18 @@ describe("Library workspace", () => {
     expect(audio.volume).toBe(0.35);
 
     setAudioNumberProperty(audio, "currentTime", 125);
+    audio.dataset.attemptId = "stale-playback-attempt";
     fireEvent.ended(audio);
-    expect(screen.getByText("Ended")).toBeInTheDocument();
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "report_playback_completed"),
+    ).toHaveLength(0);
+    audio.dataset.attemptId = "playback-attempt-1";
+    fireEvent.ended(audio);
+    expect(await screen.findByText("Ended")).toBeInTheDocument();
+    fireEvent.ended(audio);
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "report_playback_completed"),
+    ).toHaveLength(1);
     expect(within(transport).getByRole("button", { name: "Play" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "Queue" })).toHaveTextContent(
       "No songs queued yet.",
@@ -3124,16 +3292,60 @@ describe("Library workspace", () => {
     await openLibraryWorkspace(user);
     await screen.findByRole("button", { name: /The Beatles/ });
 
-    await playSongFromLibrary(user, "Hey Jude");
+    await playSongFromLibrary(user, "Hey Jude", false);
 
     expect(
       await screen.findByText("Playback could not start. Press Play to try again."),
     ).toBeInTheDocument();
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("report_playback_failed", {
+      request: {
+        attemptId: "playback-attempt-1",
+        kind: "start-rejected",
+        message: "Playback could not start. Press Play to try again.",
+      },
+    });
 
     vi.mocked(HTMLMediaElement.prototype.play).mockResolvedValueOnce(undefined);
     const transport = screen.getByRole("contentinfo", { name: "Media transport" });
     await user.click(within(transport).getByRole("button", { name: "Play" }));
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not duplicate Host playback requests or adapter reports under StrictMode", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    renderStrictApp();
+    await openLibraryWorkspace(user);
+    await screen.findByRole("button", { name: /The Beatles/ });
+
+    await playSongFromLibrary(user, "Hey Jude");
+
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "request_song_playback"),
+    ).toHaveLength(1);
+    expect(
+      tauriMocks.invoke.mock.calls.filter(([command]) => command === "report_playback_started"),
+    ).toHaveLength(1);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies the Host stop projection to the persistent audio adapter", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByRole("button", { name: /The Beatles/ });
+    await playSongFromLibrary(user, "Hey Jude");
+
+    await user.click(screen.getByRole("button", { name: "Developer" }));
+    await user.click(screen.getByRole("button", { name: "Stop playback" }));
+
+    await waitFor(() => expect(playbackProjectionState.state).toBe("stopped"));
+    await waitFor(() => expect(getAudioElement()).not.toHaveAttribute("src"));
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("request_playback_stop", {
+      request: { requestId: expect.any(String) },
+    });
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
   });
 
   it("shows recoverable media errors and can replace the song afterward", async () => {
@@ -3164,7 +3376,7 @@ describe("Library workspace", () => {
     await playSongFromLibrary(user, "Hey Jude");
     await waitFor(() =>
       expect(tauriMocks.invoke).toHaveBeenCalledWith("parse_song_lyrics", {
-        song: populatedScanResult.songs[0],
+        songId: populatedScanResult.songs[0].id,
       }),
     );
 
@@ -3314,7 +3526,7 @@ describe("Library workspace", () => {
 
     setAudioNumberProperty(audio, "currentTime", 1.2);
     fireEvent.seeking(audio);
-    fireEvent.pause(audio);
+    await user.click(screen.getByRole("button", { name: "Pause" }));
     await waitFor(() =>
       expect(container.querySelector(".lyric-line-stack")).toHaveAttribute(
         "data-effective-time-ms",
@@ -3577,7 +3789,6 @@ describe("Library workspace", () => {
     );
 
     const audio = getAudioElement();
-    fireEvent.play(audio);
 
     await waitFor(() => expect(animationFrameCallbacks.size).toBe(1));
     const scheduledFrameId = Array.from(animationFrameCallbacks.keys())[0];
@@ -3608,7 +3819,7 @@ describe("Library workspace", () => {
       "0.500",
     );
 
-    fireEvent.pause(audio);
+    await user.click(screen.getByRole("button", { name: "Pause" }));
     const queuedFrameCount = animationFrameCallbacks.size;
     setAudioNumberProperty(audio, "currentTime", 1.16);
     runAnimationFrame();
@@ -3622,11 +3833,16 @@ describe("Library workspace", () => {
     );
     expect(animationFrameCallbacks.size).toBeLessThanOrEqual(queuedFrameCount);
 
-    fireEvent.play(audio);
+    await user.click(screen.getByRole("button", { name: "Play" }));
+    await waitFor(() => expect(playbackProjectionState.state).toBe("starting"));
+    fireEvent.playing(audio);
+    await waitFor(() => expect(playbackProjectionState.state).toBe("playing"));
     runAnimationFrame();
-    expect(container.querySelector('[data-fragment-id="rapid-c"]')).toHaveAttribute(
-      "data-fragment-state",
-      "active",
+    await waitFor(() =>
+      expect(container.querySelector('[data-fragment-id="rapid-c"]')).toHaveAttribute(
+        "data-fragment-state",
+        "active",
+      ),
     );
     expect(container.querySelector('[data-fragment-id="rapid-c"]')).toHaveAttribute(
       "data-fill-progress",
@@ -3747,11 +3963,12 @@ describe("Library workspace", () => {
     fireEvent.timeUpdate(audio);
     expect(await screen.findByText("Yesterday all my troubles")).toBeInTheDocument();
 
-    fireEvent.pause(audio);
+    await user.click(screen.getByRole("button", { name: "Pause" }));
     expect(screen.getByText("Yesterday all my troubles")).toBeInTheDocument();
 
-    fireEvent.play(audio);
-    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Play" }));
+    fireEvent.playing(audio);
+    expect(await screen.findByRole("button", { name: "Pause" })).toBeInTheDocument();
     setAudioNumberProperty(audio, "currentTime", 4.2);
     fireEvent.timeUpdate(audio);
     expect(screen.getByText("Seemed so far away")).toBeInTheDocument();
@@ -3760,15 +3977,11 @@ describe("Library workspace", () => {
   it("shows lyric parser failure without blocking playback", async () => {
     const user = userEvent.setup();
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
-    tauriMocks.invoke.mockImplementation((command: string, args?: { song?: MediaSong }) => {
+    tauriMocks.invoke.mockImplementation((command: string, args?: PlaybackMockArgs) => {
       if (command === "parse_song_lyrics") {
         return Promise.reject("The lyric file is not a supported TTML document.");
       }
-      if (command === "resolve_audio_source") {
-        const song = args?.song ?? populatedScanResult.songs[0];
-        return Promise.resolve({ songId: song.id, audioPath: song.audioPath });
-      }
-      return mockSuccessfulLibraryInvoke(command);
+      return mockSuccessfulLibraryInvoke(command, args);
     });
     render(<App />);
     await openLibraryWorkspace(user);
@@ -3788,27 +4001,23 @@ describe("Library workspace", () => {
   it("replaces lyrics when loading another song", async () => {
     const user = userEvent.setup();
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
-    tauriMocks.invoke.mockImplementation((command: string, args?: { song?: MediaSong }) => {
+    tauriMocks.invoke.mockImplementation((command: string, args?: PlaybackMockArgs) => {
       if (command === "parse_song_lyrics") {
-        const song = args?.song ?? populatedScanResult.songs[0];
+        const songId = args?.songId ?? populatedScanResult.songs[0].id;
         return Promise.resolve({
           ...populatedLyricDocument,
-          sourceSongId: song.id,
+          sourceSongId: songId,
           lines: [
             {
               ...populatedLyricDocument.lines[0],
-              id: `line-${song.id}`,
-              text: song.id === "song-b" ? "Jóga lyric line" : "Yesterday all my troubles",
+              id: `line-${songId}`,
+              text: songId === "song-b" ? "Jóga lyric line" : "Yesterday all my troubles",
               segments: [],
             },
           ],
         });
       }
-      if (command === "resolve_audio_source") {
-        const song = args?.song ?? populatedScanResult.songs[0];
-        return Promise.resolve({ songId: song.id, audioPath: song.audioPath });
-      }
-      return mockSuccessfulLibraryInvoke(command);
+      return mockSuccessfulLibraryInvoke(command, args);
     });
     render(<App />);
     await openLibraryWorkspace(user);
