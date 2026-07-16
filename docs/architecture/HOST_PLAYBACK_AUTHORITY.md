@@ -1,6 +1,6 @@
 # Host Playback Authority
 
-**Status:** Implemented prerequisite for P6-003 Queue
+**Status:** Implemented and used by Host Performance authority
 
 Accepted Platform and Host RFCs remain authoritative. This note records the current Host implementation boundary; it does not replace those RFCs.
 
@@ -34,6 +34,8 @@ The one persistent HTML audio element applies `start`, `pause`, `resume`, and `s
 
 Pause, resume, stop, completion, and failure remain explicit Host lifecycle transitions. Automatic next-song selection is not part of this prerequisite.
 
+Direct diagnostic playback is admitted only when no nonterminal Performance exists. Queue also waits while Playback is already active before creating its next Performance. Performance-owned playback bypasses the direct diagnostic admission check but still uses the same typed Playback coordinator operation.
+
 ## Attempt Identity And Idempotency
 
 Every accepted start creates an opaque Host attempt ID. Adapter reports must match the current attempt; stale reports are rejected and counted without altering newer playback.
@@ -61,6 +63,6 @@ Manual verification:
 5. Start another song and verify a stale prior attempt report cannot alter it.
 6. Request a removed or stale song ID through tests and confirm no audio starts.
 
-## Queue Relationship
+## Queue And Performance Relationship
 
-P6-003 Queue may request playback only through this coordinator using stable song IDs. Queue ordering, the accepted three-second countdown, participant locking, and automatic advancement remain future P6-003 responsibilities.
+Queue does not call Playback directly. Queue creates a Host-owned Performance, and Performance requests playback through this coordinator using the stable song ID. Performance owns the Accepted three-second countdown and produces the terminal outcome that Queue later consumes.

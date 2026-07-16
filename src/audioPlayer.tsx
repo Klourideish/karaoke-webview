@@ -275,7 +275,7 @@ export function useAudioPlayer(): AudioPlayer {
 
   return {
     audioElement,
-    currentSong: projection.song,
+    currentSong: activePlaybackSong(projection),
     currentTime,
     duration,
     error: adapterError ?? projection.failureMessage,
@@ -290,6 +290,10 @@ export function useAudioPlayer(): AudioPlayer {
     stop,
     volume,
   };
+}
+
+function activePlaybackSong(projection: PlaybackProjection) {
+  return projection.state === "completed" ? null : projection.song;
 }
 
 export function formatMediaTime(seconds: number) {

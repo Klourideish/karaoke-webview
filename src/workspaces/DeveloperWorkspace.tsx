@@ -16,6 +16,7 @@ import { LibraryDiagnostics } from "../media-library/LibraryDiagnostics";
 import type { useMediaLibrary } from "../media-library/useMediaLibrary";
 import type { AudioPlayer } from "../audioPlayer";
 import type { PerformanceController } from "../performance/usePerformance";
+import type { useQueue } from "../queue/useQueue";
 
 export function DeveloperWorkspace({
   audioPlayer,
@@ -28,6 +29,7 @@ export function DeveloperWorkspace({
   performance,
   recovery,
   singers,
+  queue,
 }: {
   audioPlayer: AudioPlayer;
   assignments: ReturnType<typeof useMicrophoneAssignments>;
@@ -39,6 +41,7 @@ export function DeveloperWorkspace({
   performance: PerformanceController;
   recovery: ReturnType<typeof useMicrophoneRecovery>;
   singers: Singer[];
+  queue: ReturnType<typeof useQueue>;
 }) {
   const development = useDevelopmentProtocol();
   const pairing = useDevelopmentPairing();
@@ -253,6 +256,26 @@ export function DeveloperWorkspace({
               {performance.error}
             </p>
           ) : null}
+        </section>
+        <section className="developer-panel" aria-labelledby="queue-diagnostics-heading">
+          <div>
+            <p className="region-label">Developer</p>
+            <h3 id="queue-diagnostics-heading">Queue authority</h3>
+          </div>
+          <DiagnosticText>
+            <p>Revision: {queue.projection.revision}</p>
+            <p>
+              Active entry: {queue.projection.current?.entry.id ?? "None"} / Performance:{" "}
+              {queue.projection.current?.performanceId ?? "None"}
+            </p>
+            <p>
+              Progression: {queue.projection.progressionPaused ? "Paused" : "Enabled"} / Size:{" "}
+              {queue.projection.diagnostics.activeQueueCount}
+            </p>
+            <p>Last transition: {queue.projection.diagnostics.lastTransition ?? "None"}</p>
+            <p>Last failure: {queue.projection.diagnostics.lastFailure ?? "None"}</p>
+            <p>Worker failure: {queue.projection.diagnostics.workerFailure ?? "None"}</p>
+          </DiagnosticText>
         </section>
         <section className="developer-panel" aria-labelledby="library-diagnostics-heading">
           <div>

@@ -12,6 +12,12 @@ pub(crate) enum PlaybackState {
     Failed,
 }
 
+impl PlaybackState {
+    pub(crate) fn is_active(self) -> bool {
+        matches!(self, Self::Starting | Self::Playing | Self::Paused)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum PlaybackAdapterAction {

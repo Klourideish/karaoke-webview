@@ -7,6 +7,7 @@ import type { LyricLine, LyricSegment } from "../lyrics";
 import { playbackStatusLabel } from "../player/playbackFormatting";
 import type { PerformanceDetailsProjection } from "../performance/types";
 import type { PerformanceController } from "../performance/usePerformance";
+import type { QueueProjection } from "../queue/types";
 import { useLyricPlaybackClock } from "../useLyricPlaybackClock";
 import type { SongLyricsState } from "../useSongLyrics";
 
@@ -15,11 +16,13 @@ export function PerformWorkspace({
   lyricOffsetMs,
   lyrics,
   performance,
+  queue,
 }: {
   audioPlayer: AudioPlayer;
   lyricOffsetMs: number;
   lyrics: SongLyricsState;
   performance: PerformanceController;
+  queue: QueueProjection;
 }) {
   const currentSong = audioPlayer.currentSong;
   const lyricSnapshot = useLyricPlaybackClock({
@@ -53,6 +56,21 @@ export function PerformWorkspace({
           <p className="lyric-error" role="alert">
             {performance.error}
           </p>
+        ) : null}
+        {queue.current || queue.queued.length > 0 ? (
+          <div className="performance-queue-summary" aria-label="Queue summary">
+            {queue.current ? (
+              <span>
+                Current: {queue.current.entry.songTitle} ·{" "}
+                {queue.current.entry.requesterDisplayName}
+              </span>
+            ) : null}
+            {queue.queued.slice(0, 2).map((entry) => (
+              <span key={entry.id}>
+                Next: {entry.songTitle} · {entry.requesterDisplayName}
+              </span>
+            ))}
+          </div>
         ) : null}
         {currentSong ? (
           <div className="lyric-display" aria-live="polite">

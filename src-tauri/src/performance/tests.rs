@@ -56,6 +56,72 @@ fn created_performance_enters_preparing_with_host_owned_identity() {
     assert!(coordinator.countdown_action(Instant::now()).is_none());
 }
 
+#[test]
+fn playback_and_performance_admission_cannot_diverge() {
+    let performance = HostPerformanceCoordinator::default();
+    let playback = HostPlaybackCoordinator::default();
+    playback
+        .request_start(
+            RequestSongPlayback {
+                request_id: "manual-playback".to_string(),
+                song_id: "song-0".to_string(),
+            },
+            || {
+                Ok(PlaybackSongProjection {
+                    id: "song-0".to_string(),
+                    title: "Existing song".to_string(),
+                    artist: "Artist".to_string(),
+                    audio_path: "C:\\Music\\Existing.opus".to_string(),
+                })
+            },
+        )
+        .unwrap();
+
+    let blocked = performance
+        .create_validated_with_playback(
+            CreatePerformanceRequest {
+                request_id: "performance".to_string(),
+                singer_id: "singer-1".to_string(),
+                song_id: "song-1".to_string(),
+            },
+            PerformanceSingerProjection {
+                id: "singer-1".to_string(),
+                display_name: "Kyle".to_string(),
+            },
+            PerformanceSongProjection {
+                id: "song-1".to_string(),
+                title: "Queued song".to_string(),
+                artist: "Artist".to_string(),
+            },
+            readiness(PerformanceMicrophoneReadinessStatus::Ready),
+            &playback,
+        )
+        .unwrap_err();
+    assert_eq!(blocked.reason_code, PerformanceErrorCode::PerformanceActive);
+    assert!(performance.projection().active.is_none());
+
+    playback
+        .report_failed(
+            playback.projection().attempt_id.as_deref().unwrap(),
+            PlaybackErrorCode::MediaFailed,
+            "test failure".to_string(),
+        )
+        .unwrap();
+    create(&performance, "active-performance");
+    let invoked = std::cell::Cell::new(false);
+    let blocked = performance
+        .admit_direct_playback(|| {
+            invoked.set(true);
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(
+        blocked.reason_code,
+        PlaybackErrorCode::PlaybackAlreadyActive
+    );
+    assert!(!invoked.get());
+}
+
 fn create(coordinator: &HostPerformanceCoordinator, request_id: &str) -> String {
     coordinator
         .create_validated(

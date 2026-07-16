@@ -7,6 +7,7 @@ mod microphones;
 mod participant_commit;
 mod performance;
 mod playback;
+mod queue;
 mod session_singers;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -22,6 +23,8 @@ pub fn run() {
         std::sync::Arc::new(capture::monitor::DiagnosticAudioMonitorManager::new());
     let performance = std::sync::Arc::new(performance::HostPerformanceCoordinator::default());
     let performance_for_setup = std::sync::Arc::clone(&performance);
+    let queue = std::sync::Arc::new(queue::HostQueueCoordinator::default());
+    let queue_for_setup = std::sync::Arc::clone(&queue);
     let app = tauri::Builder::default()
         .manage(std::sync::Arc::clone(&development_protocol))
         .manage(development_pairing)
@@ -40,8 +43,10 @@ pub fn run() {
         .manage(media_library::MediaLibraryRefreshCoordinator::default())
         .manage(playback::HostPlaybackCoordinator::default())
         .manage(std::sync::Arc::clone(&performance))
+        .manage(std::sync::Arc::clone(&queue))
         .setup(move |app| {
             performance_for_setup.start_worker(app.handle().clone());
+            queue_for_setup.start_worker(app.handle().clone());
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
@@ -109,15 +114,28 @@ pub fn run() {
             development_pairing::cancel_development_pairing_offer,
             development_pairing::accept_development_pairing_proposal,
             development_pairing::reject_development_pairing_proposal,
-            microphones::unassign_microphone_channel
+            microphones::unassign_microphone_channel,
+            queue::get_queue_projection,
+            queue::add_song_to_queue,
+            queue::remove_queue_entry,
+            queue::move_queue_entry,
+            queue::vote_for_queue_entry,
+            queue::remove_queue_vote,
+            queue::pause_queue_progression,
+            queue::resume_queue_progression,
+            queue::skip_current_queue_entry,
+            queue::retry_failed_queue_entry
         ])
         .build(tauri::generate_context!())
         .expect("error while building Karaoke Webview");
     let performance_for_exit = std::sync::Arc::clone(&performance);
+    let queue_for_exit = std::sync::Arc::clone(&queue);
     app.run(move |_, event| {
         if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            queue_for_exit.shutdown();
             performance_for_exit.shutdown();
         }
     });
+    queue.shutdown();
     performance.shutdown();
 }

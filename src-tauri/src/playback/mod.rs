@@ -27,8 +27,9 @@ pub(crate) fn request_song_playback(
     app: tauri::AppHandle,
     request: RequestSongPlayback,
     coordinator: tauri::State<'_, HostPlaybackCoordinator>,
+    performance: tauri::State<'_, std::sync::Arc<crate::performance::HostPerformanceCoordinator>>,
 ) -> Result<PlaybackProjection, PlaybackError> {
-    request_song_playback_owned(&app, &coordinator, request)
+    performance.admit_direct_playback(|| request_song_playback_owned(&app, &coordinator, request))
 }
 
 pub(crate) fn request_song_playback_owned(

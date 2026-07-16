@@ -1,6 +1,6 @@
 # Host Performance Authority
 
-**Status:** Implemented prerequisite for P6-003 Queue
+**Status:** Implemented and integrated with the P6-003 Queue prototype
 
 Accepted RFC-P-003 and the other Accepted Platform and Host RFCs remain authoritative. This note records the Host implementation boundary and does not replace the RFC lifecycle.
 
@@ -41,7 +41,7 @@ Stale adapter reports cannot change Performance. Playback failure produces termi
 
 Matching playback completion moves Performance through `finalizing` into `results`. Results owns a ten-second Host monotonic deadline, matching RFC-P-003's current default. The initial UI may be minimal, but React cannot skip or complete this phase. Expiry transitions to `completed`.
 
-Queue is not implemented here. Future Queue work may react only to a matching Performance terminal projection under explicit Queue policy; it must not advance directly from an audio completion event.
+Queue links an entry to the Performance created for it and reacts only to the matching typed terminal outcome. Queue does not own the countdown or advance directly from an audio completion event.
 
 ## Diagnostics And Verification
 
@@ -63,5 +63,5 @@ Manual verification:
 
 - The current command creates one Standard-mode Performance with one performer.
 - Party and Battle runtime participant structures remain future work.
-- Queue creation, advancement, voting, persistence, history, and scoring are not implemented.
+- Queue progression consumes Performance terminal outcomes; persistence, history, and scoring are not implemented.
 - Results UI is intentionally minimal even though its lifecycle deadline is authoritative.

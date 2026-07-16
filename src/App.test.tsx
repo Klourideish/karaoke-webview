@@ -16,6 +16,7 @@ import type { DevelopmentPairingProjection, PairingOfferProjection } from "./pai
 import type { ParticipantCommitDiagnosticProjection } from "./session-singers/types";
 import { idlePlaybackProjection, type PlaybackProjection } from "./playback/types";
 import { emptyPerformanceProjection, type PerformanceProjection } from "./performance/types";
+import { idleQueueProjection } from "./queue/useQueue";
 
 const tauriMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -896,6 +897,9 @@ function mockSuccessfulLibraryInvoke(command: string, args?: PlaybackMockArgs) {
       ...playbackLyrics,
       sourceSongId: args?.songId ?? playbackSongs[0].id,
     });
+  }
+  if (command === "get_queue_projection") {
+    return Promise.resolve(structuredClone(idleQueueProjection));
   }
   if (command === "load_library_settings") {
     return Promise.resolve({ libraryRoot: "C:\\Music" });
@@ -3254,7 +3258,7 @@ describe("Library workspace", () => {
     ).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "Queue" })).toHaveTextContent(
-      "No songs queued yet.",
+      "No songs queued.",
     );
   });
 
@@ -3333,13 +3337,15 @@ describe("Library workspace", () => {
     audio.dataset.attemptId = "playback-attempt-1";
     fireEvent.ended(audio);
     expect(await screen.findByText("Ended")).toBeInTheDocument();
+    expect(within(transport).getByText("No song loaded")).toBeInTheDocument();
+    expect(within(transport).queryByText("Hey Jude")).not.toBeInTheDocument();
     fireEvent.ended(audio);
     expect(
       tauriMocks.invoke.mock.calls.filter(([command]) => command === "report_playback_completed"),
     ).toHaveLength(1);
     expect(within(transport).getByRole("button", { name: "Play" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "Queue" })).toHaveTextContent(
-      "No songs queued yet.",
+      "No songs queued.",
     );
   });
 
@@ -4359,7 +4365,7 @@ describe("Library workspace", () => {
     ).toHaveLength(2);
   });
 
-  it("does not show queue actions in Library", async () => {
+  it("does not show direct playback actions in Library", async () => {
     const user = userEvent.setup();
     const { container } = render(<App />);
 
@@ -4372,9 +4378,6 @@ describe("Library workspace", () => {
     ).not.toBeInTheDocument();
     expect(
       within(library as HTMLElement).queryByRole("button", { name: /index/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(library as HTMLElement).queryByRole("button", { name: /add to queue/i }),
     ).not.toBeInTheDocument();
   });
 });

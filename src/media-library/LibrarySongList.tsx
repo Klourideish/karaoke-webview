@@ -1,17 +1,25 @@
 import { useMemo, useState } from "react";
 import { groupSongsByArtist } from "./libraryPresentation";
 import type { MediaSong } from "./types";
+import type { Singer } from "../app/SingerBar";
 
 export function LibrarySongList({
   isSearchActive,
   songs,
   totalSongCount,
+  singers,
+  onAddSong,
+  queueError,
 }: {
   isSearchActive: boolean;
   songs: MediaSong[];
   totalSongCount: number;
+  singers: readonly Singer[];
+  onAddSong: (songId: string, singerId: string) => Promise<boolean>;
+  queueError: string | null;
 }) {
   const [expandedArtists, setExpandedArtists] = useState<Set<string>>(() => new Set());
+  const [requestingSongId, setRequestingSongId] = useState<string | null>(null);
   const groups = useMemo(() => groupSongsByArtist(songs), [songs]);
 
   if (totalSongCount === 0) {
@@ -60,8 +68,57 @@ export function LibrarySongList({
             {expanded ? (
               <div className="artist-song-list" id={contentId}>
                 {group.songs.map((song) => (
-                  <article className="artist-song-row" key={song.id}>
-                    <span>{song.title}</span>
+                  <article className="library-song-tile" key={song.id}>
+                    <span className="library-song-title" title={song.title}>
+                      {song.title}
+                    </span>
+                    <div className="song-row-actions">
+                      {requestingSongId === song.id ? (
+                        <div className="requester-selection" aria-label="Choose singer">
+                          {singers.length === 0 ? (
+                            <span className="no-singers-warning">Create a singer first!</span>
+                          ) : (
+                            <>
+                              <span className="selection-label">Who is singing?</span>
+                              {singers.map((singer) => (
+                                <button
+                                  key={singer.id}
+                                  className="select-singer-btn"
+                                  type="button"
+                                  onClick={() => {
+                                    void onAddSong(song.id, singer.id).then((added) => {
+                                      if (added) setRequestingSongId(null);
+                                    });
+                                  }}
+                                >
+                                  {singer.displayName}
+                                </button>
+                              ))}
+                            </>
+                          )}
+                          <button
+                            className="cancel-singer-btn"
+                            type="button"
+                            onClick={() => setRequestingSongId(null)}
+                          >
+                            Cancel
+                          </button>
+                          {queueError ? (
+                            <span className="queue-add-error" role="alert">
+                              {queueError}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <button
+                          className="add-to-queue-btn"
+                          type="button"
+                          onClick={() => setRequestingSongId(song.id)}
+                        >
+                          Add to Queue
+                        </button>
+                      )}
+                    </div>
                   </article>
                 ))}
               </div>

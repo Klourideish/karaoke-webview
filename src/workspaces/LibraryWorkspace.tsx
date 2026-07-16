@@ -2,11 +2,18 @@ import { useMemo } from "react";
 import { LibrarySongList } from "../media-library/LibrarySongList";
 import { groupSongsByArtist } from "../media-library/libraryPresentation";
 import { useMediaLibrary } from "../media-library/useMediaLibrary";
+import type { Singer } from "../app/SingerBar";
 
 export function LibraryWorkspace({
   mediaLibrary,
+  singers,
+  onAddSong,
+  queueError,
 }: {
   mediaLibrary: ReturnType<typeof useMediaLibrary>;
+  singers: readonly Singer[];
+  onAddSong: (songId: string, singerId: string) => Promise<boolean>;
+  queueError: string | null;
 }) {
   const {
     chooseFolder,
@@ -95,6 +102,9 @@ export function LibraryWorkspace({
               isSearchActive={searchTerm.trim().length > 0}
               songs={filteredSongs}
               totalSongCount={songCount}
+              singers={singers}
+              onAddSong={onAddSong}
+              queueError={queueError}
             />
           </section>
         </>

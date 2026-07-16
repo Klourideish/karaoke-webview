@@ -41,7 +41,7 @@ The previous `sync_session_singers` authority path has been removed. Microphone 
 
 ## Removal Policy
 
-Removal is rejected with `singer-in-use` while the singer has a microphone assignment or an explicit waiting-for-microphone state. Removal does not cascade into other registries. Queue, active Performance, and history references are not implemented yet; their future authoritative registries must participate in this validation before singer removal can cover those relationships.
+Removal is rejected with `singer-in-use` while the singer has a microphone assignment, an explicit waiting-for-microphone state, an active Queue entry, or an active Queue vote. Queue insertion, voting, and singer removal share the Queue operation boundary so no stale singer reference can be introduced during removal. Removal does not cascade into other registries.
 
 ## Participant Commit Coordinator
 
@@ -102,6 +102,6 @@ before development QR pairing is added.
 
 - Session singers are in-memory and reset on application restart.
 - The Host currently seeds four default session singers to preserve the existing operator experience.
-- Queue, Performance, profile, and history ownership are not implemented here.
+- Profile and history ownership are not implemented here. Queue and Performance retain their own cross-domain references.
 - No QR pairing, retained identity, or Android behavior is included.
 - The Connect phone choice is intentionally disabled until P5-002.

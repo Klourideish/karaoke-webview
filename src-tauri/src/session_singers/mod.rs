@@ -48,21 +48,30 @@ pub(crate) fn remove_session_singer(
         std::sync::Arc<crate::development_protocol::DevelopmentProtocolManager>,
     >,
     performance: tauri::State<'_, std::sync::Arc<crate::performance::HostPerformanceCoordinator>>,
+    queue: tauri::State<'_, std::sync::Arc<crate::queue::HostQueueCoordinator>>,
 ) -> Result<SessionSingerProjection, SessionSingerError> {
-    if performance.has_active_singer(&singer_id) {
-        return Err(SessionSingerError::new(
-            SessionSingerErrorCode::SingerInUse,
-            "Stop the singer's current Performance before removing the singer.",
-        ));
-    }
-    remove_session_singer_owned(
-        &singer_id,
-        &registry,
-        &assignments,
-        &operations,
-        &pairing,
-        &development,
-    )
+    queue.with_singer_reference_guard(&singer_id, |queue_referenced| {
+        if queue_referenced {
+            return Err(SessionSingerError::new(
+                SessionSingerErrorCode::SingerInUse,
+                "Remove this singer's queue entries and votes before removing the singer.",
+            ));
+        }
+        if performance.has_active_singer(&singer_id) {
+            return Err(SessionSingerError::new(
+                SessionSingerErrorCode::SingerInUse,
+                "Stop the singer's current Performance before removing the singer.",
+            ));
+        }
+        remove_session_singer_owned(
+            &singer_id,
+            &registry,
+            &assignments,
+            &operations,
+            &pairing,
+            &development,
+        )
+    })
 }
 
 fn remove_session_singer_owned(

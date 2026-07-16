@@ -19,12 +19,14 @@ import { LibraryWorkspace } from "../workspaces/LibraryWorkspace";
 import { MicrophoneWorkspace } from "../workspaces/MicrophoneWorkspace";
 import { PerformWorkspace } from "../workspaces/PerformWorkspace";
 import { PlaceholderWorkspace } from "../workspaces/PlaceholderWorkspace";
+import { QueueWorkspace } from "../workspaces/QueueWorkspace";
 import { QueuePanel } from "./QueuePanel";
 import { SingerBar, type Singer } from "./SingerBar";
 import { TabRail } from "./TabRail";
 import { TopInfoBar } from "./TopInfoBar";
 import type { AppTab, TabDefinition } from "./appTabs";
 import { buildSingerReadinessProjections } from "./singerReadiness";
+import { useQueue } from "../queue/useQueue";
 
 export function AppShell({
   activeTab,
@@ -93,6 +95,8 @@ export function AppShell({
     sources: microphones.sources,
   });
 
+  const queue = useQueue();
+
   async function commitPhysicalParticipant(
     requestId: string,
     displayName: string,
@@ -147,9 +151,10 @@ export function AppShell({
             onSelectTab={onSelectTab}
             singers={singers}
             view={activeView}
+            queue={queue}
           />
         </main>
-        <QueuePanel />
+        <QueuePanel queue={queue.projection} performance={performance.projection} />
       </div>
 
       <BottomMediaBar audioPlayer={audioPlayer} />
@@ -190,6 +195,7 @@ function MainContent({
   onSelectTab,
   singers,
   view,
+  queue,
 }: {
   audioPlayer: AudioPlayer;
   lyrics: ReturnType<typeof useSongLyrics>;
@@ -205,6 +211,7 @@ function MainContent({
   onSelectTab: (tab: AppTab) => void;
   singers: Singer[];
   view: TabDefinition;
+  queue: ReturnType<typeof useQueue>;
 }) {
   if (view.id === "performance") {
     return (
@@ -213,12 +220,24 @@ function MainContent({
         lyricOffsetMs={lyricOffsetMs}
         lyrics={lyrics}
         performance={performance}
+        queue={queue.projection}
       />
     );
   }
 
   if (view.id === "library") {
-    return <LibraryWorkspace mediaLibrary={mediaLibrary} />;
+    return (
+      <LibraryWorkspace
+        mediaLibrary={mediaLibrary}
+        singers={singers}
+        onAddSong={queue.addSong}
+        queueError={queue.error}
+      />
+    );
+  }
+
+  if (view.id === "queue") {
+    return <QueueWorkspace queue={queue} singers={singers} performance={performance} />;
   }
 
   if (view.id === "mic") {
@@ -248,6 +267,7 @@ function MainContent({
         recovery={microphoneRecovery}
         singers={singers}
         assignments={microphoneAssignments}
+        queue={queue}
       />
     );
   }

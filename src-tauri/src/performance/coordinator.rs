@@ -21,6 +21,7 @@ use super::models::{
 pub(crate) const COUNTDOWN_DURATION: Duration = Duration::from_secs(3);
 pub(crate) const RESULTS_DURATION: Duration = Duration::from_secs(10);
 const IDEMPOTENCY_CAPACITY: usize = 128;
+const TERMINAL_OUTCOME_CAPACITY: usize = 128;
 
 #[derive(Clone)]
 struct CachedOperation {
@@ -55,6 +56,7 @@ struct PerformanceInner {
     idempotency_hit_count: u64,
     idempotency_conflict_count: u64,
     operations: VecDeque<CachedOperation>,
+    terminal_outcomes: VecDeque<(String, PerformanceLifecycleState)>,
 }
 
 impl Default for PerformanceInner {
@@ -68,6 +70,7 @@ impl Default for PerformanceInner {
             idempotency_hit_count: 0,
             idempotency_conflict_count: 0,
             operations: VecDeque::new(),
+            terminal_outcomes: VecDeque::new(),
         }
     }
 }
@@ -95,6 +98,61 @@ impl HostPerformanceCoordinator {
         projection(&lock(&self.inner), Instant::now())
     }
 
+    #[cfg(test)]
+    pub(crate) fn create_for_queue_test(
+        &self,
+        request: CreatePerformanceRequest,
+        ready: bool,
+    ) -> Result<PerformanceProjection, PerformanceError> {
+        let readiness = PerformanceMicrophoneReadiness {
+            status: if ready {
+                PerformanceMicrophoneReadinessStatus::Ready
+            } else {
+                PerformanceMicrophoneReadinessStatus::Blocked
+            },
+            mode: crate::microphones::KaraokeMode::Standard,
+            participants: Vec::new(),
+            locked_participants: Vec::new(),
+            message: "queue test readiness".to_string(),
+        };
+        let projection = self.create_validated(
+            request.clone(),
+            PerformanceSingerProjection {
+                id: request.singer_id,
+                display_name: "Queue singer".to_string(),
+            },
+            PerformanceSongProjection {
+                id: request.song_id,
+                title: "Queue song".to_string(),
+                artist: "Queue artist".to_string(),
+            },
+            readiness.clone(),
+        )?;
+        let performance_id = projection
+            .active
+            .as_ref()
+            .expect("queue test Performance")
+            .id
+            .clone();
+        self.apply_readiness(&performance_id, readiness, Instant::now())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_terminal_for_queue_test(
+        &self,
+        performance_id: &str,
+        state: PerformanceLifecycleState,
+    ) {
+        assert!(state.is_terminal());
+        let _operation = lock(&self.operation);
+        let mut inner = lock(&self.inner);
+        assert_eq!(
+            inner.active.as_ref().map(|active| active.id.as_str()),
+            Some(performance_id)
+        );
+        transition(&mut inner, state);
+    }
+
     pub(crate) fn create_validated(
         &self,
         request: CreatePerformanceRequest,
@@ -103,6 +161,52 @@ impl HostPerformanceCoordinator {
         readiness: PerformanceMicrophoneReadiness,
     ) -> Result<PerformanceProjection, PerformanceError> {
         let _operation = lock(&self.operation);
+        self.create_validated_locked(request, performer, song, readiness)
+    }
+
+    pub(crate) fn create_validated_with_playback(
+        &self,
+        request: CreatePerformanceRequest,
+        performer: PerformanceSingerProjection,
+        song: PerformanceSongProjection,
+        readiness: PerformanceMicrophoneReadiness,
+        playback: &crate::playback::HostPlaybackCoordinator,
+    ) -> Result<PerformanceProjection, PerformanceError> {
+        let _operation = lock(&self.operation);
+        if playback.projection().state.is_active() {
+            return Err(PerformanceError::new(
+                PerformanceErrorCode::PerformanceActive,
+                "Wait for the current playback to stop before starting this Performance.",
+            ));
+        }
+        self.create_validated_locked(request, performer, song, readiness)
+    }
+
+    pub(crate) fn admit_direct_playback<T>(
+        &self,
+        action: impl FnOnce() -> Result<T, crate::playback::PlaybackError>,
+    ) -> Result<T, crate::playback::PlaybackError> {
+        let _operation = lock(&self.operation);
+        if lock(&self.inner)
+            .active
+            .as_ref()
+            .is_some_and(|performance| !performance.state.is_terminal())
+        {
+            return Err(crate::playback::PlaybackError::new(
+                crate::playback::PlaybackErrorCode::PlaybackAlreadyActive,
+                "Playback is controlled by the active Performance.",
+            ));
+        }
+        action()
+    }
+
+    fn create_validated_locked(
+        &self,
+        request: CreatePerformanceRequest,
+        performer: PerformanceSingerProjection,
+        song: PerformanceSongProjection,
+        readiness: PerformanceMicrophoneReadiness,
+    ) -> Result<PerformanceProjection, PerformanceError> {
         let fingerprint = format!("create:{}:{}", request.singer_id, request.song_id);
         let mut inner = lock(&self.inner);
         if let Some(cached) = cached_result(&mut inner, &request.request_id, &fingerprint)? {
@@ -409,6 +513,23 @@ impl HostPerformanceCoordinator {
             .as_ref()
             .is_some_and(|active| !active.state.is_terminal() && active.performer.id == singer_id)
     }
+
+    pub(crate) fn lifecycle_for(&self, performance_id: &str) -> Option<PerformanceLifecycleState> {
+        let inner = lock(&self.inner);
+        inner
+            .active
+            .as_ref()
+            .filter(|active| active.id == performance_id)
+            .map(|active| active.state)
+            .or_else(|| {
+                inner
+                    .terminal_outcomes
+                    .iter()
+                    .rev()
+                    .find(|(id, _)| id == performance_id)
+                    .map(|(_, state)| *state)
+            })
+    }
 }
 
 fn begin_countdown(inner: &mut PerformanceInner, now: Instant) {
@@ -434,8 +555,18 @@ fn transition(inner: &mut PerformanceInner, next: PerformanceLifecycleState) {
     let active = inner.active.as_mut().expect("active Performance required");
     let prior = active.state;
     active.state = next;
+    let terminal_outcome = next.is_terminal().then(|| (active.id.clone(), next));
     inner.revision += 1;
     inner.last_transition = Some(format!("{prior:?}->{next:?}"));
+    if let Some(outcome) = terminal_outcome {
+        inner
+            .terminal_outcomes
+            .retain(|(performance_id, _)| performance_id != &outcome.0);
+        if inner.terminal_outcomes.len() == TERMINAL_OUTCOME_CAPACITY {
+            inner.terminal_outcomes.pop_front();
+        }
+        inner.terminal_outcomes.push_back(outcome);
+    }
 }
 
 fn projection(inner: &PerformanceInner, now: Instant) -> PerformanceProjection {

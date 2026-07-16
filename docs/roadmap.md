@@ -14,6 +14,7 @@ Phone interaction is a core product direction, not an optional add-on. Sequence 
 - session-local signed lyric offset with operator controls
 - Host-owned playback authority with stable indexed song lookup and attempt-scoped adapter reports
 - Host-owned Performance authority with RFC-P-003 lifecycle, readiness, countdown, playback linkage, and results deadline
+- Host-owned Queue prototype with deterministic ordering, bounded voting, and Performance-owned progression
 - Host-owned session singer registry and atomic participant commit foundation
 - Host Sync dialog and physical microphone onboarding through the atomic participant commit
 
@@ -31,7 +32,6 @@ Phone interaction is a core product direction, not an optional add-on. Sequence 
 - client/protocol proof of concept
 - development QR pairing and participant setup contract
 - Android microphone relay proof of concept in its separate repository
-- Host-authoritative queue orchestration over the completed Performance boundary
 - history/database foundation
 - scoring foundation
 - multi-display operator/TV separation
@@ -66,5 +66,5 @@ Architecture direction and unresolved protocol decisions are tracked in [archite
 
 → UI consolidation
 → Navigation
-→ Queue experience
-→ Library queue integration after authoritative queue commands exist
+✔ Queue experience
+✔ Library queue integration through authoritative Queue commands

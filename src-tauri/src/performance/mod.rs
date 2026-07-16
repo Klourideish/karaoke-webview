@@ -13,12 +13,10 @@ use tauri::{Emitter, Manager};
 
 pub(crate) use coordinator::HostPerformanceCoordinator;
 pub(crate) use models::{
-    CreatePerformanceRequest, PerformanceLifecycleState, PerformanceProjection,
+    CreatePerformanceRequest, PerformanceError, PerformanceErrorCode, PerformanceLifecycleState,
+    PerformanceMutationRequest, PerformanceProjection,
 };
-use models::{
-    PerformanceError, PerformanceErrorCode, PerformanceMutationRequest,
-    PerformanceSingerProjection, PerformanceSongProjection,
-};
+use models::{PerformanceSingerProjection, PerformanceSongProjection};
 
 pub(crate) const PERFORMANCE_PROJECTION_EVENT: &str = "performance-projection-changed";
 const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -68,8 +66,9 @@ pub(crate) fn create_performance(
     request: CreatePerformanceRequest,
     coordinator: tauri::State<'_, Arc<HostPerformanceCoordinator>>,
     singers: tauri::State<'_, crate::session_singers::SessionSingerRegistry>,
+    playback: tauri::State<'_, crate::playback::HostPlaybackCoordinator>,
 ) -> Result<PerformanceProjection, PerformanceError> {
-    create_performance_owned(&app, request, &coordinator, &singers)
+    create_performance_owned(&app, request, &coordinator, &singers, &playback)
 }
 
 pub(crate) fn create_performance_owned(
@@ -77,6 +76,7 @@ pub(crate) fn create_performance_owned(
     request: CreatePerformanceRequest,
     coordinator: &HostPerformanceCoordinator,
     singers: &crate::session_singers::SessionSingerRegistry,
+    playback: &crate::playback::HostPlaybackCoordinator,
 ) -> Result<PerformanceProjection, PerformanceError> {
     let singer = singers.get(&request.singer_id).ok_or_else(|| {
         PerformanceError::new(
@@ -90,7 +90,7 @@ pub(crate) fn create_performance_owned(
         .map_err(|message| PerformanceError::new(PerformanceErrorCode::LyricsInvalid, message))?;
     let readiness = readiness(app, &request.singer_id, true, false, false)
         .map_err(|message| PerformanceError::new(PerformanceErrorCode::InternalError, message))?;
-    let projection = coordinator.create_validated(
+    let projection = coordinator.create_validated_with_playback(
         request,
         PerformanceSingerProjection {
             id: singer.id,
@@ -102,6 +102,7 @@ pub(crate) fn create_performance_owned(
             artist: resolved.song.artist,
         },
         readiness.clone(),
+        playback,
     )?;
     let performance_id = projection
         .active
@@ -123,9 +124,18 @@ pub(crate) fn cancel_preparation(
     coordinator: tauri::State<'_, Arc<HostPerformanceCoordinator>>,
     playback: tauri::State<'_, crate::playback::HostPlaybackCoordinator>,
 ) -> Result<PerformanceProjection, PerformanceError> {
-    stop_linked_playback(&app, &coordinator, &playback, &request, "cancel")?;
+    cancel_preparation_owned(&app, request, &coordinator, &playback)
+}
+
+pub(crate) fn cancel_preparation_owned(
+    app: &tauri::AppHandle,
+    request: PerformanceMutationRequest,
+    coordinator: &HostPerformanceCoordinator,
+    playback: &crate::playback::HostPlaybackCoordinator,
+) -> Result<PerformanceProjection, PerformanceError> {
+    stop_linked_playback(app, coordinator, playback, &request, "cancel")?;
     let projection = coordinator.cancel(request)?;
-    publish(&app, &projection);
+    publish(app, &projection);
     Ok(projection)
 }
 
@@ -136,9 +146,18 @@ pub(crate) fn skip_performance(
     coordinator: tauri::State<'_, Arc<HostPerformanceCoordinator>>,
     playback: tauri::State<'_, crate::playback::HostPlaybackCoordinator>,
 ) -> Result<PerformanceProjection, PerformanceError> {
-    stop_linked_playback(&app, &coordinator, &playback, &request, "skip")?;
+    skip_performance_owned(&app, request, &coordinator, &playback)
+}
+
+pub(crate) fn skip_performance_owned(
+    app: &tauri::AppHandle,
+    request: PerformanceMutationRequest,
+    coordinator: &HostPerformanceCoordinator,
+    playback: &crate::playback::HostPlaybackCoordinator,
+) -> Result<PerformanceProjection, PerformanceError> {
+    stop_linked_playback(app, coordinator, playback, &request, "skip")?;
     let projection = coordinator.skip(request)?;
-    publish(&app, &projection);
+    publish(app, &projection);
     Ok(projection)
 }
 

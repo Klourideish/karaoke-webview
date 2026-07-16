@@ -1,12 +1,14 @@
 use crate::media_library::{
     models::{LibraryIndexLoadStatus, MediaSong},
     persistence::{load_library_index_for_root, read_library_settings, SettingsError},
-    scanner::{path_to_string, song_id},
+    scanner::song_id,
 };
 use std::path::{Path, PathBuf};
 
 #[cfg(test)]
 use crate::media_library::models::ResolvedAudioSource;
+#[cfg(test)]
+use crate::media_library::scanner::path_to_string;
 
 #[derive(Debug)]
 pub(crate) struct IndexedPlaybackSong {
