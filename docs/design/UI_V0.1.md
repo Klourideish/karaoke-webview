@@ -139,12 +139,14 @@ Performance lyrics use a large readability-first hierarchy and a friendly rounde
 the current line is dominant from several metres away, while previous and upcoming context remains
 legible without competing for attention. Long authored lines wrap naturally without changing text.
 
-The top-bar lyric offset is a session-local presentation adjustment from `-3000 ms` to `+3000 ms`
-in `100 ms` steps. Negative values show lyrics earlier, positive values show them later, and reset
-returns to authored timing. The setting survives workspace and song changes during the current app
-runtime, but does not alter playback, parsed timestamps, or song metadata. Lines and timed fragments
-use half-open authored intervals (`start <= effective time < end`). Meaningful inline TTML spacing is
-preserved while formatting indentation is ignored.
+The top-bar lyric timing control distinguishes a Host-saved song offset, a temporary adjustment, and
+their effective total. Both adjustments use `100 ms` steps within the supported `-3000 ms` to
+`+3000 ms` range. Negative values show lyrics earlier and positive values show them later. Saving is
+explicit and keyed by stable song identity; temporary timing resets when the song changes and can be
+reset without removing the saved value. Neither value alters playback, parsed timestamps, TTML, or
+song metadata. Presentation applies `totalOffset = savedSongOffset + temporarySessionOffset` once.
+Lines and timed fragments use half-open authored intervals (`start <= effective time < end`).
+Meaningful inline TTML spacing is preserved while formatting indentation is ignored.
 
 Do not overload the performance area with queue or singer statistics.
 
