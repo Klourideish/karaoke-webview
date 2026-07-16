@@ -4,6 +4,7 @@ import type {
   DevelopmentProtocolStatus,
   DevelopmentStreamDiagnostics,
   LocalMicrophoneSource,
+  PhonePairingListenerProjection,
 } from "./types";
 
 export type StartDevelopmentProtocolRequest = {
@@ -20,6 +21,18 @@ export function startDevelopmentProtocolListener(
 
 export function stopDevelopmentProtocolListener(): Promise<DevelopmentProtocolProjection> {
   return invoke<DevelopmentProtocolProjection>("stop_development_protocol_listener");
+}
+
+export function startListenerForPhonePairing(): Promise<PhonePairingListenerProjection> {
+  return invoke<PhonePairingListenerProjection>("start_listener_for_phone_pairing");
+}
+
+export function selectPhonePairingListenerAddress(
+  candidateId: string,
+): Promise<PhonePairingListenerProjection> {
+  return invoke<PhonePairingListenerProjection>("select_phone_pairing_listener_address", {
+    request: { candidateId },
+  });
 }
 
 export function getDevelopmentProtocolStatus(): Promise<DevelopmentProtocolStatus> {

@@ -127,6 +127,7 @@ export type DevelopmentSourceHealth =
 export type DevelopmentProtocolStatus = {
   listenerState: DevelopmentListenerState;
   bindAddress: string;
+  advertisedAddress: string | null;
   tcpPort: number;
   udpPort: number;
   connectedClientCount: number;
@@ -173,4 +174,32 @@ export type DevelopmentProtocolProjection = {
   status: DevelopmentProtocolStatus;
   diagnostics: DevelopmentStreamDiagnostics;
   sources: LocalMicrophoneSource[];
+};
+
+export type PhonePairingAddressCandidate = {
+  id: string;
+  address: string;
+  interfaceName: string;
+};
+
+export type PhonePairingListenerErrorCode =
+  | "no-reachable-lan-address"
+  | "ambiguous-lan-address"
+  | "listener-bind-failed"
+  | "listener-already-active"
+  | "endpoint-resolution-failed"
+  | "invalid-selected-address"
+  | "internal-error";
+
+export type PhonePairingListenerError = {
+  reasonCode: PhonePairingListenerErrorCode;
+  message: string;
+  candidates: PhonePairingAddressCandidate[];
+};
+
+export type PhonePairingListenerProjection = {
+  listener: DevelopmentProtocolProjection;
+  advertisedAddress: string;
+  controlPort: number;
+  audioPort: number;
 };

@@ -24,12 +24,16 @@ use crate::{
 };
 
 use super::{
+    address::{discover_phone_pairing_candidates, is_phone_reachable_ipv4},
     audio_handoff::{AudioHandoff, PushResult, ReceiveResult},
     jitter::{JitterBuffer, JitterOutput, JitterReject},
     models::{
         ClientControlMessage, DevelopmentListenerState, DevelopmentProtocolProjection,
         DevelopmentProtocolStatus, DevelopmentSourceHealth, DevelopmentStreamDiagnostics,
-        HostControlMessage, StartDevelopmentProtocolRequest, DEFAULT_TCP_PORT, DEFAULT_UDP_PORT,
+        HostControlMessage, PhonePairingAddressCandidate, PhonePairingListenerError,
+        PhonePairingListenerErrorCode, PhonePairingListenerProjection,
+        SelectPhonePairingAddressRequest, StartDevelopmentProtocolRequest, DEFAULT_TCP_PORT,
+        DEFAULT_UDP_PORT,
     },
     packet::{parse_audio_packet, AudioPacket},
 };
@@ -37,6 +41,7 @@ use super::{
 const HEARTBEAT_INTERVAL_MS: u64 = 1_000;
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(3);
 const DEFAULT_BIND_ADDRESS: &str = "127.0.0.1";
+const PHONE_PAIRING_BIND_ADDRESS: &str = "0.0.0.0";
 const JITTER_TARGET_MS: u64 = 30;
 const JITTER_MAX_MS: u64 = 60;
 const JITTER_MAX_PACKETS: usize = 6;
@@ -89,6 +94,7 @@ struct MeterSubscriber {
 struct ManagerInner {
     listener_state: DevelopmentListenerState,
     bind_address: String,
+    advertised_address: Option<String>,
     tcp_port: u16,
     udp_port: u16,
     error: Option<String>,
@@ -129,6 +135,7 @@ impl DevelopmentProtocolManager {
             inner: Arc::new(Mutex::new(ManagerInner {
                 listener_state: DevelopmentListenerState::Stopped,
                 bind_address: DEFAULT_BIND_ADDRESS.to_string(),
+                advertised_address: None,
                 tcp_port: DEFAULT_TCP_PORT,
                 udp_port: DEFAULT_UDP_PORT,
                 error: None,
@@ -153,6 +160,87 @@ impl DevelopmentProtocolManager {
         request: StartDevelopmentProtocolRequest,
     ) -> Result<DevelopmentProtocolProjection, String> {
         let _operation = lock(&self.operations);
+        self.start_locked(request, None)
+    }
+
+    pub(crate) fn start_for_phone_pairing(
+        &self,
+    ) -> Result<PhonePairingListenerProjection, PhonePairingListenerError> {
+        self.start_for_phone_pairing_with(
+            None,
+            discover_phone_pairing_candidates,
+            phone_pairing_start_request(),
+        )
+    }
+
+    pub(crate) fn select_phone_pairing_address(
+        &self,
+        request: SelectPhonePairingAddressRequest,
+    ) -> Result<PhonePairingListenerProjection, PhonePairingListenerError> {
+        self.start_for_phone_pairing_with(
+            Some(request.candidate_id.as_str()),
+            discover_phone_pairing_candidates,
+            phone_pairing_start_request(),
+        )
+    }
+
+    fn start_for_phone_pairing_with<F>(
+        &self,
+        selected_candidate_id: Option<&str>,
+        discover: F,
+        start_request: StartDevelopmentProtocolRequest,
+    ) -> Result<PhonePairingListenerProjection, PhonePairingListenerError>
+    where
+        F: FnOnce() -> Result<Vec<PhonePairingAddressCandidate>, PhonePairingListenerError>,
+    {
+        let _operation = lock(&self.operations);
+        let listener_is_active = lock(&self.workers).is_some();
+        if listener_is_active {
+            let mut inner = lock(&self.inner);
+            if inner.listener_state != DevelopmentListenerState::Listening {
+                return Err(PhonePairingListenerError::new(
+                    PhonePairingListenerErrorCode::ListenerAlreadyActive,
+                    "The development listener is already starting or stopping.",
+                ));
+            }
+            if inner
+                .advertised_address
+                .as_deref()
+                .is_some_and(is_phone_reachable_ipv4)
+            {
+                drop(inner);
+                return self.phone_pairing_listener_projection();
+            }
+            if is_phone_reachable_ipv4(&inner.bind_address) {
+                inner.advertised_address = Some(inner.bind_address.clone());
+                drop(inner);
+                return self.phone_pairing_listener_projection();
+            }
+            if inner.bind_address != PHONE_PAIRING_BIND_ADDRESS {
+                return Err(PhonePairingListenerError::new(
+                    PhonePairingListenerErrorCode::ListenerAlreadyActive,
+                    "The active development listener is not reachable from a phone. Stop it before starting phone pairing.",
+                ));
+            }
+        }
+
+        let candidates = discover()?;
+        let selected = select_candidate(candidates, selected_candidate_id)?;
+        if listener_is_active {
+            lock(&self.inner).advertised_address = Some(selected.address);
+            return self.phone_pairing_listener_projection();
+        }
+
+        self.start_locked(start_request, Some(selected.address))
+            .map_err(phone_pairing_start_error)?;
+        self.phone_pairing_listener_projection()
+    }
+
+    fn start_locked(
+        &self,
+        request: StartDevelopmentProtocolRequest,
+        advertised_address: Option<String>,
+    ) -> Result<DevelopmentProtocolProjection, String> {
         if lock(&self.workers).is_some() {
             return Ok(self.projection());
         }
@@ -166,6 +254,8 @@ impl DevelopmentProtocolManager {
             let mut inner = lock(&self.inner);
             inner.listener_state = DevelopmentListenerState::Starting;
             inner.bind_address = bind_address.clone();
+            inner.advertised_address = advertised_address
+                .or_else(|| is_phone_reachable_ipv4(&bind_address).then(|| bind_address.clone()));
             inner.tcp_port = tcp_port;
             inner.udp_port = udp_port;
             inner.error = None;
@@ -241,7 +331,10 @@ impl DevelopmentProtocolManager {
         self.clear_runtime_state("development-listener-stopped");
         self.stop_workers();
         self.pairing.listener_stopped();
-        lock(&self.inner).listener_state = DevelopmentListenerState::Stopped;
+        let mut inner = lock(&self.inner);
+        inner.listener_state = DevelopmentListenerState::Stopped;
+        inner.advertised_address = None;
+        drop(inner);
         self.projection()
     }
 
@@ -252,6 +345,24 @@ impl DevelopmentProtocolManager {
             diagnostics: diagnostics_from_inner(&inner),
             sources: source_from_inner(&inner).into_iter().collect(),
         }
+    }
+
+    fn phone_pairing_listener_projection(
+        &self,
+    ) -> Result<PhonePairingListenerProjection, PhonePairingListenerError> {
+        let listener = self.projection();
+        let advertised_address = listener.status.advertised_address.clone().ok_or_else(|| {
+            PhonePairingListenerError::new(
+                PhonePairingListenerErrorCode::InternalError,
+                "The listener started without a phone-reachable endpoint.",
+            )
+        })?;
+        Ok(PhonePairingListenerProjection {
+            control_port: listener.status.tcp_port,
+            audio_port: listener.status.udp_port,
+            advertised_address,
+            listener,
+        })
     }
 
     pub(crate) fn sources(&self) -> Vec<DiscoveredMicrophoneSource> {
@@ -272,7 +383,13 @@ impl DevelopmentProtocolManager {
                 "Start the insecure development listener before pairing a phone.",
             ));
         }
-        Ok((inner.bind_address.clone(), inner.tcp_port))
+        let advertised_address = inner.advertised_address.clone().ok_or_else(|| {
+            PairingError::new(
+                PairingErrorCode::UnreachableHostAddress,
+                "The development listener has no concrete phone-reachable LAN address.",
+            )
+        })?;
+        Ok((advertised_address, inner.tcp_port))
     }
 
     pub(crate) fn queue_pairing_outbound(&self, outbound: PairingOutboundMessage) {
@@ -398,6 +515,7 @@ impl DevelopmentProtocolManager {
     fn mark_failed(&self, message: String) {
         let mut inner = lock(&self.inner);
         inner.listener_state = DevelopmentListenerState::Failed;
+        inner.advertised_address = None;
         inner.error = Some(message);
     }
 
@@ -1058,6 +1176,7 @@ fn status_from_inner(inner: &ManagerInner) -> DevelopmentProtocolStatus {
     DevelopmentProtocolStatus {
         listener_state: inner.listener_state,
         bind_address: inner.bind_address.clone(),
+        advertised_address: inner.advertised_address.clone(),
         tcp_port: inner.tcp_port,
         udp_port: inner.udp_port,
         connected_client_count: u8::from(connection.is_some()),
@@ -1074,6 +1193,56 @@ fn status_from_inner(inner: &ManagerInner) -> DevelopmentProtocolStatus {
         rejected_control_messages: inner.counters.rejected_control_messages,
         closure_reason: inner.closure_reason.clone(),
         error: inner.error.clone(),
+    }
+}
+
+fn select_candidate(
+    candidates: Vec<PhonePairingAddressCandidate>,
+    selected_candidate_id: Option<&str>,
+) -> Result<PhonePairingAddressCandidate, PhonePairingListenerError> {
+    if candidates.is_empty() {
+        return Err(PhonePairingListenerError::new(
+            PhonePairingListenerErrorCode::NoReachableLanAddress,
+            "No phone-reachable IPv4 address is available on this Host.",
+        ));
+    }
+    if let Some(selected_candidate_id) = selected_candidate_id {
+        return candidates
+            .iter()
+            .find(|candidate| candidate.id == selected_candidate_id)
+            .cloned()
+            .ok_or_else(|| {
+                PhonePairingListenerError::with_candidates(
+                    PhonePairingListenerErrorCode::InvalidSelectedAddress,
+                    "The selected LAN address is no longer available.",
+                    candidates,
+                )
+            });
+    }
+    if candidates.len() > 1 {
+        return Err(PhonePairingListenerError::with_candidates(
+            PhonePairingListenerErrorCode::AmbiguousLanAddress,
+            "More than one phone-reachable LAN address is available. Choose the trusted network.",
+            candidates,
+        ));
+    }
+    Ok(candidates.into_iter().next().expect("candidate is present"))
+}
+
+fn phone_pairing_start_error(message: String) -> PhonePairingListenerError {
+    let reason_code = if message.contains("Could not start insecure development") {
+        PhonePairingListenerErrorCode::ListenerBindFailed
+    } else {
+        PhonePairingListenerErrorCode::InternalError
+    };
+    PhonePairingListenerError::new(reason_code, message)
+}
+
+fn phone_pairing_start_request() -> StartDevelopmentProtocolRequest {
+    StartDevelopmentProtocolRequest {
+        bind_address: Some(PHONE_PAIRING_BIND_ADDRESS.to_string()),
+        tcp_port: Some(DEFAULT_TCP_PORT),
+        udp_port: Some(DEFAULT_UDP_PORT),
     }
 }
 
@@ -1193,6 +1362,22 @@ mod tests {
             bind_address: Some("127.0.0.1".to_string()),
             tcp_port: Some(0),
             udp_port: Some(0),
+        }
+    }
+
+    fn phone_test_request() -> StartDevelopmentProtocolRequest {
+        StartDevelopmentProtocolRequest {
+            bind_address: Some(PHONE_PAIRING_BIND_ADDRESS.to_string()),
+            tcp_port: Some(0),
+            udp_port: Some(0),
+        }
+    }
+
+    fn phone_candidate(id: &str, address: &str) -> PhonePairingAddressCandidate {
+        PhonePairingAddressCandidate {
+            id: id.to_string(),
+            address: address.to_string(),
+            interface_name: "Wi-Fi".to_string(),
         }
     }
 
@@ -1362,6 +1547,167 @@ mod tests {
         assert!(error
             .message
             .contains("Start the insecure development listener"));
+    }
+
+    #[test]
+    fn phone_pairing_single_candidate_binds_wildcard_and_advertises_concrete_address() {
+        let manager = DevelopmentProtocolManager::new();
+        let projection = manager
+            .start_for_phone_pairing_with(
+                None,
+                || Ok(vec![phone_candidate("wifi", "192.168.1.42")]),
+                phone_test_request(),
+            )
+            .unwrap();
+
+        assert_eq!(projection.listener.status.bind_address, "0.0.0.0");
+        assert_eq!(projection.advertised_address, "192.168.1.42");
+        assert_ne!(
+            projection.advertised_address,
+            projection.listener.status.bind_address
+        );
+        assert_eq!(
+            manager.pairing_endpoint().unwrap(),
+            ("192.168.1.42".to_string(), projection.control_port)
+        );
+        manager.stop();
+    }
+
+    #[test]
+    fn phone_pairing_reports_no_candidate_and_ambiguity_without_starting() {
+        let manager = DevelopmentProtocolManager::new();
+        let error = manager
+            .start_for_phone_pairing_with(None, || Ok(Vec::new()), phone_test_request())
+            .unwrap_err();
+        assert_eq!(
+            error.reason_code,
+            PhonePairingListenerErrorCode::NoReachableLanAddress
+        );
+
+        let error = manager
+            .start_for_phone_pairing_with(
+                None,
+                || {
+                    Ok(vec![
+                        phone_candidate("ethernet", "10.0.0.8"),
+                        phone_candidate("wifi", "192.168.1.42"),
+                    ])
+                },
+                phone_test_request(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.reason_code,
+            PhonePairingListenerErrorCode::AmbiguousLanAddress
+        );
+        assert_eq!(error.candidates.len(), 2);
+        assert!(!manager.has_workers_for_test());
+    }
+
+    #[test]
+    fn phone_pairing_selected_candidate_is_revalidated() {
+        let manager = DevelopmentProtocolManager::new();
+        let error = manager
+            .start_for_phone_pairing_with(
+                Some("stale-candidate"),
+                || Ok(vec![phone_candidate("wifi", "192.168.1.42")]),
+                phone_test_request(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.reason_code,
+            PhonePairingListenerErrorCode::InvalidSelectedAddress
+        );
+        assert!(!manager.has_workers_for_test());
+
+        let projection = manager
+            .start_for_phone_pairing_with(
+                Some("wifi"),
+                || Ok(vec![phone_candidate("wifi", "192.168.1.42")]),
+                phone_test_request(),
+            )
+            .unwrap();
+        assert_eq!(projection.advertised_address, "192.168.1.42");
+        manager.stop();
+    }
+
+    #[test]
+    fn phone_pairing_reuses_an_active_wildcard_listener() {
+        let manager = DevelopmentProtocolManager::new();
+        let existing = manager.start(phone_test_request()).unwrap();
+        assert_eq!(existing.status.advertised_address, None);
+
+        let projection = manager
+            .start_for_phone_pairing_with(
+                None,
+                || Ok(vec![phone_candidate("wifi", "192.168.1.42")]),
+                phone_test_request(),
+            )
+            .unwrap();
+
+        assert_eq!(projection.control_port, existing.status.tcp_port);
+        assert_eq!(projection.audio_port, existing.status.udp_port);
+        assert_eq!(projection.advertised_address, "192.168.1.42");
+        manager.stop();
+    }
+
+    #[test]
+    fn active_loopback_listener_is_not_restarted_for_phone_pairing() {
+        let manager = DevelopmentProtocolManager::new();
+        manager.start(test_request()).unwrap();
+
+        let error = manager
+            .start_for_phone_pairing_with(
+                None,
+                || Ok(vec![phone_candidate("wifi", "192.168.1.42")]),
+                phone_test_request(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.reason_code,
+            PhonePairingListenerErrorCode::ListenerAlreadyActive
+        );
+        assert_eq!(manager.projection().status.bind_address, "127.0.0.1");
+        manager.stop();
+    }
+
+    #[test]
+    fn endpoint_discovery_and_bind_failures_are_typed() {
+        let manager = DevelopmentProtocolManager::new();
+        let error = manager
+            .start_for_phone_pairing_with(
+                None,
+                || {
+                    Err(PhonePairingListenerError::new(
+                        PhonePairingListenerErrorCode::EndpointResolutionFailed,
+                        "Interface query failed.",
+                    ))
+                },
+                phone_test_request(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.reason_code,
+            PhonePairingListenerErrorCode::EndpointResolutionFailed
+        );
+
+        let occupied = TcpListener::bind((PHONE_PAIRING_BIND_ADDRESS, 0)).unwrap();
+        let port = occupied.local_addr().unwrap().port();
+        let error = manager
+            .start_for_phone_pairing_with(
+                None,
+                || Ok(vec![phone_candidate("wifi", "192.168.1.42")]),
+                StartDevelopmentProtocolRequest {
+                    bind_address: Some(PHONE_PAIRING_BIND_ADDRESS.to_string()),
+                    tcp_port: Some(port),
+                    udp_port: Some(0),
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.reason_code,
+            PhonePairingListenerErrorCode::ListenerBindFailed
+        );
     }
 
     #[test]

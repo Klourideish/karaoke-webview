@@ -14,16 +14,20 @@ It does not provide pairing, authentication, encryption, replay protection, reta
 
 ## Enabling
 
-Open the Developer workspace and use the **Start Listener** button in the **Network microphone receiver** section.
+Open the Developer workspace and use the **Start Listener** button in the **Network microphone receiver** section. The button requests the shared Host-owned phone-pairing startup operation; React does not provide a bind address or ports.
 
 The listener is not started automatically on application startup.
 
-Default endpoints:
+Host-owned development ports:
 
-- TCP control: `127.0.0.1:45820`
-- UDP audio: `127.0.0.1:45821`
+- TCP control: `45820`
+- UDP audio: `45821`
 
-The bind address and ports are configurable through the Host command boundary for development tests. The default UI action starts the listener on loopback. Synthetic tests or development tooling may call `start_development_protocol_listener` with an explicit request such as:
+For phone pairing, the Host binds the approved wildcard address `0.0.0.0` and separately resolves one concrete phone-reachable IPv4 address for advertisement. The wildcard address is never placed in the QR payload. Loopback, unspecified, multicast, IPv6, link-local, down, and clearly virtual-only candidates are excluded. Private LAN addresses are preferred and candidates are ordered deterministically.
+
+If one suitable address remains, the Host uses it. No candidate returns `no-reachable-lan-address`. Multiple candidates return `ambiguous-lan-address` with immutable candidates; the UI may return one Host-generated candidate ID through `select_phone_pairing_listener_address`. The Host revalidates that candidate before starting or reusing the listener.
+
+The lower-level bind address and ports remain configurable through the existing Host command boundary for synthetic development tests. Such tooling may call `start_development_protocol_listener` with an explicit request such as:
 
 ```json
 {
@@ -35,7 +39,7 @@ The bind address and ports are configurable through the Host command boundary fo
 }
 ```
 
-Use `127.0.0.1` for local-only tests. Use a LAN interface address or `0.0.0.0` only when intentionally testing from another device on a trusted development network.
+Use `127.0.0.1` for local-only synthetic tests. Use the Host-owned phone startup operation for QR pairing on a trusted development network.
 
 A Windows firewall prompt may appear if the listener is configured to bind beyond loopback.
 

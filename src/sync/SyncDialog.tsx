@@ -1,6 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import type { LocalMicrophoneSource } from "../microphones/types";
+import type {
+  LocalMicrophoneSource,
+  PhonePairingAddressCandidate,
+  PhonePairingListenerError,
+} from "../microphones/types";
+import { useDevelopmentProtocol } from "../microphones/useDevelopmentProtocol";
 import { useDevelopmentPairing } from "../pairing/useDevelopmentPairing";
 import type { ParticipantCommitProjection } from "../session-singers/types";
 import { usePhysicalParticipantSetup } from "./usePhysicalParticipantSetup";
@@ -24,14 +29,57 @@ export function SyncDialog({
 }) {
   const setup = usePhysicalParticipantSetup({ onCommit, onSuccess });
   const pairing = useDevelopmentPairing();
+  const development = useDevelopmentProtocol();
   const [phoneFlow, setPhoneFlow] = useState(false);
+  const [phonePreparing, setPhonePreparing] = useState(false);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const phonePreparationInFlight = useRef(false);
   const selectedSource = eligibleSources.find((source) => source.id === setup.sourceId);
-  const isSubmitting = setup.step === "submitting" || pairing.pendingAction !== null;
+  const isSubmitting =
+    setup.step === "submitting" || pairing.pendingAction !== null || phonePreparing;
   const pairingStatus = pairing.projection.status;
 
   async function startPhonePairing() {
     setPhoneFlow(true);
-    await pairing.create();
+    await preparePhonePairing();
+  }
+
+  async function preparePhonePairing(candidateId?: string) {
+    if (phonePreparationInFlight.current) return;
+    phonePreparationInFlight.current = true;
+    setPhonePreparing(true);
+    setPhoneError(null);
+    try {
+      let preparationError: PhonePairingListenerError | null = null;
+      if (candidateId) {
+        const result = await development.selectPhonePairingAddressWithResult(candidateId);
+        preparationError = result.error;
+      } else {
+        const refreshedStatus = await development.refresh();
+        const status = refreshedStatus ?? development.status;
+        const listenerIsPhoneReady =
+          status.listenerState === "listening" && Boolean(status.advertisedAddress);
+        if (!listenerIsPhoneReady) {
+          const result = await development.startForPhonePairingWithResult();
+          preparationError = result.error;
+        }
+      }
+
+      if (preparationError) {
+        if (preparationError.reasonCode !== "ambiguous-lan-address") {
+          setPhoneError(phonePreparationMessage(preparationError.reasonCode));
+        }
+        return;
+      }
+
+      const offer = await pairing.create();
+      if (!offer) {
+        setPhoneError("Phone pairing couldn’t be created. Try again.");
+      }
+    } finally {
+      phonePreparationInFlight.current = false;
+      setPhonePreparing(false);
+    }
   }
 
   async function closeDialog() {
@@ -84,7 +132,7 @@ export function SyncDialog({
               <button type="button" onClick={() => void startPhonePairing()}>
                 Connect phone
               </button>
-              <p id="phone-sync-help">Pair a phone on the active development network.</p>
+              <p id="phone-sync-help">Show a code for the singer to scan.</p>
               <button type="button" onClick={setup.selectPhysical}>
                 Use physical microphone
               </button>
@@ -92,7 +140,16 @@ export function SyncDialog({
           </div>
         ) : null}
 
-        {phoneFlow ? <PhonePairingContent pairing={pairing} onAccept={acceptParticipant} /> : null}
+        {phoneFlow ? (
+          <PhonePairingContent
+            pairing={pairing}
+            candidates={development.phonePairingCandidates}
+            error={phoneError}
+            isPreparing={phonePreparing}
+            onAccept={acceptParticipant}
+            onPrepare={preparePhonePairing}
+          />
+        ) : null}
 
         {!phoneFlow && setup.step === "choose-microphone" ? (
           <div className="sync-dialog-content">
@@ -153,9 +210,9 @@ export function SyncDialog({
           </div>
         ) : null}
 
-        {(phoneFlow ? pairing.error : setup.error) ? (
+        {(phoneFlow ? (phoneError ?? pairing.error) : setup.error) ? (
           <p className="sync-dialog-error" role="alert">
-            {phoneFlow ? pairing.error : setup.error}
+            {phoneFlow ? (phoneError ?? pairing.error) : setup.error}
           </p>
         ) : null}
 
@@ -192,10 +249,18 @@ export function SyncDialog({
 
 function PhonePairingContent({
   pairing,
+  candidates,
+  error,
+  isPreparing,
   onAccept,
+  onPrepare,
 }: {
   pairing: ReturnType<typeof useDevelopmentPairing>;
+  candidates: readonly PhonePairingAddressCandidate[];
+  error: string | null;
+  isPreparing: boolean;
   onAccept: () => Promise<void>;
+  onPrepare: (candidateId?: string) => Promise<void>;
 }) {
   const { lifecycleState, pendingParticipant, acceptedParticipant, expiresInSeconds } =
     pairing.projection.status;
@@ -205,33 +270,37 @@ function PhonePairingContent({
       lifecycleState === "created" ||
       lifecycleState === "displayed" ||
       lifecycleState === "claimed");
-  const hasPhoneState =
-    pairing.pendingAction === "create" || Boolean(showQr) || lifecycleState !== null;
 
   return (
     <div className="sync-dialog-content phone-pairing-content">
-      <p className="sync-development-warning" role="note">
-        Insecure development pairing. Use only on a trusted local network.
-      </p>
-      {pairing.pendingAction === "create" ? <p>Creating pairing code...</p> : null}
-      {!hasPhoneState && !pairing.error ? (
-        <p className="sync-empty-state" role="status">
-          Pairing could not start. Check the development listener and try again.
-        </p>
+      {isPreparing || pairing.pendingAction === "create" ? (
+        <p role="status">Preparing phone pairing…</p>
+      ) : null}
+      {!isPreparing && candidates.length > 0 ? (
+        <>
+          <h3>Choose the network your phone is using</h3>
+          <div className="sync-network-list">
+            {candidates.map((candidate) => (
+              <button type="button" key={candidate.id} onClick={() => void onPrepare(candidate.id)}>
+                <span>{candidate.interfaceName}</span>
+                <span>{candidate.address}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+      {!isPreparing && error && candidates.length === 0 ? (
+        <button type="button" onClick={() => void onPrepare()}>
+          Try again
+        </button>
       ) : null}
       {showQr ? (
         <>
           <h3>Scan with the Karaoke Webview Android client</h3>
-          <div className="sync-qr-code" aria-label="Development pairing QR code">
+          <div className="sync-qr-code" aria-label="Phone pairing QR code">
             <QRCodeSVG value={pairing.offer!.qrPayload} size={196} level="M" />
           </div>
-          <p>
-            Host: {pairing.offer!.hostAddress}:{pairing.offer!.controlPort}
-          </p>
           <p>Expires in {expiresInSeconds ?? pairing.offer!.lifetimeSeconds} seconds.</p>
-          <p className="sync-pairing-fallback">
-            Development code: {pairing.offer!.pairingToken.slice(0, 8)}...
-          </p>
           <p>Waiting for participant...</p>
         </>
       ) : null}
@@ -274,7 +343,7 @@ function PhonePairingContent({
         <>
           <h3>Participant not added</h3>
           <p>{pairing.projection.status.lastRejectionMessage ?? "The proposal was rejected."}</p>
-          <button type="button" onClick={() => void pairing.create()}>
+          <button type="button" onClick={() => void onPrepare()}>
             Generate another code
           </button>
         </>
@@ -282,11 +351,22 @@ function PhonePairingContent({
       {lifecycleState === "expired" || lifecycleState === "cancelled" ? (
         <>
           <h3>{lifecycleState === "expired" ? "Pairing code expired" : "Pairing cancelled"}</h3>
-          <button type="button" onClick={() => void pairing.create()}>
+          <button type="button" onClick={() => void onPrepare()}>
             Generate another code
           </button>
         </>
       ) : null}
     </div>
   );
+}
+
+function phonePreparationMessage(reasonCode: PhonePairingListenerError["reasonCode"]) {
+  if (
+    reasonCode === "no-reachable-lan-address" ||
+    reasonCode === "endpoint-resolution-failed" ||
+    reasonCode === "invalid-selected-address"
+  ) {
+    return "Couldn’t prepare phone pairing. Make sure this computer and phone are on the same network.";
+  }
+  return "Couldn’t start phone pairing. Try again.";
 }

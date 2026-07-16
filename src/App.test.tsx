@@ -319,6 +319,7 @@ const readyPerformanceMicrophoneReadiness: PerformanceMicrophoneReadiness = {
 const stoppedDevelopmentStatus: DevelopmentProtocolStatus = {
   listenerState: "stopped",
   bindAddress: "127.0.0.1",
+  advertisedAddress: null,
   tcpPort: 45820,
   udpPort: 45821,
   connectedClientCount: 0,
@@ -339,6 +340,8 @@ const stoppedDevelopmentStatus: DevelopmentProtocolStatus = {
 const activeDevelopmentStatus: DevelopmentProtocolStatus = {
   ...stoppedDevelopmentStatus,
   listenerState: "listening",
+  bindAddress: "0.0.0.0",
+  advertisedAddress: "192.168.1.78",
   connectedClientCount: 1,
   currentConnectionId: "development-connection-1",
   currentSessionId: "development-session-1",
@@ -373,6 +376,15 @@ const idleDevelopmentDiagnostics: DevelopmentStreamDiagnostics = {
   lastValidPacketAgeMs: null,
   level: { rms: 0, peak: 0, clipping: false, sequence: 0 },
 };
+
+function phonePairingListenerProjection(status = activeDevelopmentStatus) {
+  return {
+    listener: { status, diagnostics: idleDevelopmentDiagnostics, sources: [] },
+    advertisedAddress: status.advertisedAddress ?? "192.168.1.78",
+    controlPort: status.tcpPort,
+    audioPort: status.udpPort,
+  };
+}
 const idleDiagnosticMonitorStatus = {
   attemptId: null,
   state: "idle" as const,
@@ -1876,6 +1888,16 @@ describe("Microphone workspace", () => {
         return Promise.resolve(developmentDiagnostics);
       }
 
+      if (command === "start_listener_for_phone_pairing") {
+        developmentStatus = activeDevelopmentStatus;
+        return Promise.resolve(phonePairingListenerProjection(developmentStatus));
+      }
+
+      if (command === "select_phone_pairing_listener_address") {
+        developmentStatus = activeDevelopmentStatus;
+        return Promise.resolve(phonePairingListenerProjection(developmentStatus));
+      }
+
       if (command === "start_development_protocol_listener") {
         developmentStatus = activeDevelopmentStatus;
         developmentDiagnostics = { ...idleDevelopmentDiagnostics, activeStreamId: 1 };
@@ -1943,7 +1965,7 @@ describe("Microphone workspace", () => {
     return dialog;
   }
 
-  it("creates one development pairing offer and renders its QR projection", async () => {
+  it("starts an inactive listener before creating one phone pairing offer", async () => {
     mockMicrophoneWorkspace({ sources: [discoveredMicrophones[0]] });
     const user = userEvent.setup();
     render(<App />);
@@ -1956,22 +1978,58 @@ describe("Microphone workspace", () => {
     expect(within(dialog).getByRole("button", { name: "Use physical microphone" })).toBeEnabled();
     await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
 
-    expect(await within(dialog).findByLabelText("Development pairing QR code")).toBeInTheDocument();
-    expect(within(dialog).getByText("Host: 192.168.1.78:45820")).toBeInTheDocument();
+    expect(await within(dialog).findByLabelText("Phone pairing QR code")).toBeInTheDocument();
     expect(within(dialog).getByText("Expires in 120 seconds.")).toBeInTheDocument();
+    const commands = tauriMocks.invoke.mock.calls.map(([command]) => command);
+    expect(commands.indexOf("start_listener_for_phone_pairing")).toBeGreaterThanOrEqual(0);
+    expect(commands.indexOf("create_development_pairing_offer")).toBeGreaterThan(
+      commands.indexOf("start_listener_for_phone_pairing"),
+    );
     expect(
       tauriMocks.invoke.mock.calls.filter(
         ([command]) => command === "create_development_pairing_offer",
       ),
     ).toHaveLength(1);
+    expect(
+      within(dialog).queryByText(/listener|bind address|advertised|plaintext|port/i),
+    ).not.toBeInTheDocument();
   });
 
-  it("keeps a typed offer-creation error visible after idle status polling", async () => {
-    mockMicrophoneWorkspace({
-      pairingCreateError: {
-        reasonCode: "listener-not-active",
-        message: "Start the insecure development listener before pairing a phone.",
-      },
+  it("uses an already phone-ready listener without another startup request", async () => {
+    mockMicrophoneWorkspace({ developmentStatus: activeDevelopmentStatus });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /Sync/ }));
+    const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
+    await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
+
+    expect(await within(dialog).findByLabelText("Phone pairing QR code")).toBeInTheDocument();
+    expect(
+      tauriMocks.invoke.mock.calls.filter(
+        ([command]) => command === "start_listener_for_phone_pairing",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("chooses a Host-projected phone network before continuing to pairing", async () => {
+    mockMicrophoneWorkspace();
+    const fallback = tauriMocks.invoke.getMockImplementation()!;
+    tauriMocks.invoke.mockImplementation((command, args) => {
+      if (command === "start_listener_for_phone_pairing") {
+        return Promise.reject({
+          reasonCode: "ambiguous-lan-address",
+          message: "Multiple LAN addresses are available.",
+          candidates: [
+            {
+              id: "wifi-candidate",
+              address: "192.168.1.78",
+              interfaceName: "Wi-Fi",
+            },
+          ],
+        });
+      }
+      return fallback(command, args);
     });
     const user = userEvent.setup();
     render(<App />);
@@ -1980,13 +2038,77 @@ describe("Microphone workspace", () => {
     const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
     await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
 
-    const expected = "Start the insecure development listener in Developer before pairing a phone.";
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent(expected);
-    await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 600));
+    expect(
+      await within(dialog).findByRole("heading", {
+        name: "Choose the network your phone is using",
+      }),
+    ).toBeVisible();
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
+      "create_development_pairing_offer",
+      expect.anything(),
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Wi-Fi 192.168.1.78" }));
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("select_phone_pairing_listener_address", {
+      request: { candidateId: "wifi-candidate" },
     });
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(expected);
-    expect(within(dialog).queryByLabelText("Development pairing QR code")).not.toBeInTheDocument();
+    expect(await within(dialog).findByLabelText("Phone pairing QR code")).toBeInTheDocument();
+  });
+
+  it("keeps listener startup failure inline and retries without leaving Singer Setup", async () => {
+    mockMicrophoneWorkspace();
+    const fallback = tauriMocks.invoke.getMockImplementation()!;
+    let startupAttempts = 0;
+    tauriMocks.invoke.mockImplementation((command, args) => {
+      if (command === "start_listener_for_phone_pairing" && startupAttempts++ === 0) {
+        return Promise.reject({
+          reasonCode: "listener-bind-failed",
+          message: "Could not bind 0.0.0.0:45820.",
+          candidates: [],
+        });
+      }
+      return fallback(command, args);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /Sync/ }));
+    const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
+    await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Couldn’t start phone pairing. Try again.",
+    );
+    expect(within(dialog).queryByText(/0\.0\.0\.0|45820|listener|bind/i)).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Try again" }));
+    expect(await within(dialog).findByLabelText("Phone pairing QR code")).toBeInTheDocument();
+  });
+
+  it("keeps pairing-offer failure inline and retries accurately", async () => {
+    mockMicrophoneWorkspace();
+    const fallback = tauriMocks.invoke.getMockImplementation()!;
+    let offerAttempts = 0;
+    tauriMocks.invoke.mockImplementation((command, args) => {
+      if (command === "create_development_pairing_offer" && offerAttempts++ === 0) {
+        return Promise.reject({
+          reasonCode: "internal-error",
+          message: "Internal pairing offer failure.",
+        });
+      }
+      return fallback(command, args);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /Sync/ }));
+    const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
+    await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Phone pairing couldn’t be created. Try again.",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Try again" }));
+    expect(await within(dialog).findByLabelText("Phone pairing QR code")).toBeInTheDocument();
   });
 
   it("does not duplicate pairing offer creation under StrictMode", async () => {
@@ -2001,8 +2123,37 @@ describe("Microphone workspace", () => {
     await user.click(await screen.findByRole("button", { name: /Sync/ }));
     const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
     await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
-    await within(dialog).findByLabelText("Development pairing QR code");
+    await within(dialog).findByLabelText("Phone pairing QR code");
 
+    expect(
+      tauriMocks.invoke.mock.calls.filter(
+        ([command]) => command === "start_listener_for_phone_pairing",
+      ),
+    ).toHaveLength(1);
+    expect(
+      tauriMocks.invoke.mock.calls.filter(
+        ([command]) => command === "create_development_pairing_offer",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("does not duplicate listener startup or pairing offers on repeated Connect phone clicks", async () => {
+    mockMicrophoneWorkspace();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: /Sync/ }));
+    const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
+    const connectPhone = within(dialog).getByRole("button", { name: "Connect phone" });
+    fireEvent.click(connectPhone);
+    fireEvent.click(connectPhone);
+
+    await within(dialog).findByLabelText("Phone pairing QR code");
+    expect(
+      tauriMocks.invoke.mock.calls.filter(
+        ([command]) => command === "start_listener_for_phone_pairing",
+      ),
+    ).toHaveLength(1);
     expect(
       tauriMocks.invoke.mock.calls.filter(
         ([command]) => command === "create_development_pairing_offer",
@@ -2018,7 +2169,7 @@ describe("Microphone workspace", () => {
     await user.click(screen.getByRole("button", { name: /Sync/ }));
     const dialog = screen.getByRole("dialog", { name: "Sync a singer" });
     await user.click(within(dialog).getByRole("button", { name: "Connect phone" }));
-    await within(dialog).findByLabelText("Development pairing QR code");
+    await within(dialog).findByLabelText("Phone pairing QR code");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
     expect(tauriMocks.invoke).toHaveBeenCalledWith("cancel_development_pairing_offer", {
@@ -2757,10 +2908,12 @@ describe("Microphone workspace", () => {
     await openDeveloperDiagnostics(user);
 
     expect(screen.getByText(/INSECURE DEVELOPMENT CONNECTION/)).toBeInTheDocument();
-    expect(screen.getByLabelText("Bind address")).toHaveValue("127.0.0.1");
-    expect(screen.getByLabelText("TCP port")).toHaveValue(45820);
-    expect(screen.getByLabelText("UDP port")).toHaveValue(45821);
-    expect(screen.getByText(/Listener: Stopped \/ TCP 45820 \/ UDP 45821/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Bind address")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Listener: Stopped \/ TCP 45820 \/ UDP 45821 \/ Bound 127.0.0.1 \/ Advertised None/,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Capture handoff: 0\/4 frames/)).toBeInTheDocument();
   });
 
@@ -2817,61 +2970,59 @@ describe("Microphone workspace", () => {
     ).toBeInTheDocument();
   });
 
-  it("passes edited development listener bind address and ports to the Host", async () => {
+  it("starts the development listener through the Host-owned phone pairing boundary", async () => {
     mockMicrophoneWorkspace();
     const user = userEvent.setup();
     render(<App />);
 
     await openMicrophoneWorkspace(user);
     await openDeveloperDiagnostics(user);
-
-    await user.clear(screen.getByLabelText("Bind address"));
-    await user.type(screen.getByLabelText("Bind address"), "192.168.1.78");
-    await user.clear(screen.getByLabelText("TCP port"));
-    await user.type(screen.getByLabelText("TCP port"), "45920");
-    await user.clear(screen.getByLabelText("UDP port"));
-    await user.type(screen.getByLabelText("UDP port"), "45921");
     await user.click(screen.getByRole("button", { name: "Start Listener" }));
 
-    expect(tauriMocks.invoke).toHaveBeenCalledWith("start_development_protocol_listener", {
-      request: { bindAddress: "192.168.1.78", tcpPort: 45920, udpPort: 45921 },
-    });
-    expect(await screen.findByText(/Client: Android Test/)).toBeInTheDocument();
-  });
-
-  it("rejects invalid development listener ports before invoking the Host", async () => {
-    mockMicrophoneWorkspace();
-    const user = userEvent.setup();
-    render(<App />);
-
-    await openMicrophoneWorkspace(user);
-    await openDeveloperDiagnostics(user);
-
-    await user.clear(screen.getByLabelText("TCP port"));
-    await user.type(screen.getByLabelText("TCP port"), "70000");
-    await user.click(screen.getByRole("button", { name: "Start Listener" }));
-
-    expect(screen.getByText("Ports must be whole numbers from 1 to 65535.")).toBeInTheDocument();
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("start_listener_for_phone_pairing");
     expect(tauriMocks.invoke).not.toHaveBeenCalledWith(
       "start_development_protocol_listener",
       expect.anything(),
     );
+    expect(screen.queryByLabelText("Bind address")).not.toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        /Listener: Listening \/ TCP 45820 \/ UDP 45821 \/ Bound 0.0.0.0 \/ Advertised 192.168.1.78/,
+      ),
+    ).toBeInTheDocument();
   });
 
-  it("disables development listener fields while listening and renders the actual bound endpoint", async () => {
-    mockMicrophoneWorkspace({ developmentStatus: activeDevelopmentStatus });
+  it("renders Host-projected ambiguous LAN candidates and selects one by candidate ID", async () => {
+    mockMicrophoneWorkspace();
+    const fallback = tauriMocks.invoke.getMockImplementation()!;
+    tauriMocks.invoke.mockImplementation((command, args) => {
+      if (command === "start_listener_for_phone_pairing") {
+        return Promise.reject({
+          reasonCode: "ambiguous-lan-address",
+          message: "Choose the trusted network.",
+          candidates: [
+            {
+              id: "wifi-candidate",
+              address: "192.168.1.78",
+              interfaceName: "Wi-Fi",
+            },
+          ],
+        });
+      }
+      return fallback(command, args);
+    });
     const user = userEvent.setup();
     render(<App />);
 
     await openMicrophoneWorkspace(user);
     await openDeveloperDiagnostics(user);
+    await user.click(screen.getByRole("button", { name: "Start Listener" }));
 
-    expect(screen.getByLabelText("Bind address")).toBeDisabled();
-    expect(screen.getByLabelText("TCP port")).toBeDisabled();
-    expect(screen.getByLabelText("UDP port")).toBeDisabled();
-    expect(
-      screen.getByText(/Listener: Listening \/ TCP 45820 \/ UDP 45821 \/ 127.0.0.1/),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Choose the trusted network.");
+    await user.click(screen.getByRole("button", { name: "Wi-Fi: 192.168.1.78" }));
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("select_phone_pairing_listener_address", {
+      request: { candidateId: "wifi-candidate" },
+    });
   });
 
   it("does not duplicate listener start under React StrictMode", async () => {
@@ -2890,7 +3041,7 @@ describe("Microphone workspace", () => {
     await waitFor(() =>
       expect(
         tauriMocks.invoke.mock.calls.filter(
-          ([command]) => command === "start_development_protocol_listener",
+          ([command]) => command === "start_listener_for_phone_pairing",
         ),
       ).toHaveLength(1),
     );

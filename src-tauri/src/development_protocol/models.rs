@@ -14,6 +14,65 @@ pub(crate) struct StartDevelopmentProtocolRequest {
     pub bind_address: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SelectPhonePairingAddressRequest {
+    pub candidate_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PhonePairingAddressCandidate {
+    pub id: String,
+    pub address: String,
+    pub interface_name: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum PhonePairingListenerErrorCode {
+    NoReachableLanAddress,
+    AmbiguousLanAddress,
+    ListenerBindFailed,
+    ListenerAlreadyActive,
+    EndpointResolutionFailed,
+    InvalidSelectedAddress,
+    InternalError,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PhonePairingListenerError {
+    pub reason_code: PhonePairingListenerErrorCode,
+    pub message: String,
+    pub candidates: Vec<PhonePairingAddressCandidate>,
+}
+
+impl PhonePairingListenerError {
+    pub(crate) fn new(
+        reason_code: PhonePairingListenerErrorCode,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            reason_code,
+            message: message.into(),
+            candidates: Vec::new(),
+        }
+    }
+
+    pub(crate) fn with_candidates(
+        reason_code: PhonePairingListenerErrorCode,
+        message: impl Into<String>,
+        candidates: Vec<PhonePairingAddressCandidate>,
+    ) -> Self {
+        Self {
+            reason_code,
+            message: message.into(),
+            candidates,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum DevelopmentListenerState {
@@ -39,6 +98,7 @@ pub(crate) enum DevelopmentSourceHealth {
 pub(crate) struct DevelopmentProtocolStatus {
     pub listener_state: DevelopmentListenerState,
     pub bind_address: String,
+    pub advertised_address: Option<String>,
     pub tcp_port: u16,
     pub udp_port: u16,
     pub connected_client_count: u8,
@@ -54,6 +114,15 @@ pub(crate) struct DevelopmentProtocolStatus {
     pub rejected_control_messages: u64,
     pub closure_reason: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PhonePairingListenerProjection {
+    pub listener: DevelopmentProtocolProjection,
+    pub advertised_address: String,
+    pub control_port: u16,
+    pub audio_port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

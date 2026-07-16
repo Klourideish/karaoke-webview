@@ -52,6 +52,14 @@ The Host refuses to create a phone offer when the development listener is stoppe
 `127.0.0.1`, `0.0.0.0`, or another non-routable destination. The QR never contains singer, channel,
 assignment, queue, or stream authority.
 
+Phone-ready listener startup is owned by `DevelopmentProtocolManager`. The explicit
+`start_listener_for_phone_pairing` operation uses Host-owned ports, binds the approved wildcard
+address, resolves usable IPv4 interfaces, and stores a separate concrete advertised address. React
+supplies no network configuration. When several private LAN candidates remain, the Host returns
+typed `ambiguous-lan-address` candidates and accepts only a Host-generated candidate ID through the
+separate selection operation. Pairing offers always use the resolved advertised address rather than
+the raw bind address.
+
 ## Control Flow
 
 The existing UTF-8 JSON-lines connection handles `pairing_claim` and
@@ -95,7 +103,7 @@ Raw pairing and setup tokens are intentionally omitted.
 
 ## Synthetic Verification
 
-1. Start the development listener on a specific reachable LAN address.
+1. Explicitly request Host-owned phone listener startup and confirm the projected advertised LAN address.
 2. Open **Sync**, choose **Connect phone**, and read the serialized QR offer projection.
 3. Send a valid `pairing_claim` over that same client's control connection.
 4. Read `pairing_accepted_for_setup` and return its exact `participantSetupToken` in a valid

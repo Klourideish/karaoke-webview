@@ -1,3 +1,4 @@
+mod address;
 mod audio_handoff;
 mod jitter;
 mod manager;
@@ -7,6 +8,7 @@ mod packet;
 pub(crate) use manager::DevelopmentProtocolManager;
 pub(crate) use models::{
     DevelopmentProtocolProjection, DevelopmentProtocolStatus, DevelopmentStreamDiagnostics,
+    PhonePairingListenerError, PhonePairingListenerProjection, SelectPhonePairingAddressRequest,
     StartDevelopmentProtocolRequest,
 };
 
@@ -20,6 +22,21 @@ pub(crate) fn start_development_protocol_listener(
         udp_port: None,
         bind_address: None,
     }))
+}
+
+#[tauri::command]
+pub(crate) fn start_listener_for_phone_pairing(
+    manager: tauri::State<'_, std::sync::Arc<DevelopmentProtocolManager>>,
+) -> Result<PhonePairingListenerProjection, PhonePairingListenerError> {
+    manager.start_for_phone_pairing()
+}
+
+#[tauri::command]
+pub(crate) fn select_phone_pairing_listener_address(
+    request: SelectPhonePairingAddressRequest,
+    manager: tauri::State<'_, std::sync::Arc<DevelopmentProtocolManager>>,
+) -> Result<PhonePairingListenerProjection, PhonePairingListenerError> {
+    manager.select_phone_pairing_address(request)
 }
 
 #[tauri::command]

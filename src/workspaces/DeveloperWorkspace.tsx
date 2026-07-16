@@ -51,10 +51,6 @@ export function DeveloperWorkspace({
   const pairing = useDevelopmentPairing();
   const diagnosticMonitor = useDiagnosticMonitor();
   const readiness = usePerformanceMicrophoneReadiness();
-  const [developmentBindAddress, setDevelopmentBindAddress] = useState("127.0.0.1");
-  const [developmentTcpPort, setDevelopmentTcpPort] = useState("45820");
-  const [developmentUdpPort, setDevelopmentUdpPort] = useState("45821");
-  const [developmentFormError, setDevelopmentFormError] = useState<string | null>(null);
   const [monitorSourceId, setMonitorSourceId] = useState("");
   const [monitorOutputId, setMonitorOutputId] = useState("default");
   const [monitorGain, setMonitorGain] = useState("25");
@@ -87,25 +83,9 @@ export function DeveloperWorkspace({
   }, [assignments.assignments, readinessMode, singers]);
 
   const isDevelopmentListenerActive = development.status.listenerState === "listening";
-  const developmentControlsDisabled =
-    development.pendingAction !== null || isDevelopmentListenerActive;
-
   async function startDevelopmentListener() {
-    const bindAddress = developmentBindAddress.trim();
-    const tcpPort = parseDevelopmentPort(developmentTcpPort);
-    const udpPort = parseDevelopmentPort(developmentUdpPort);
-    if (!bindAddress) {
-      setDevelopmentFormError("Enter a bind address before starting the listener.");
-      return;
-    }
-    if (tcpPort === null || udpPort === null) {
-      setDevelopmentFormError("Ports must be whole numbers from 1 to 65535.");
-      return;
-    }
-
-    setDevelopmentFormError(null);
-    await development.start({ bindAddress, tcpPort, udpPort });
-    await discovery.refresh();
+    const projection = await development.startForPhonePairing();
+    if (projection) await discovery.refresh();
   }
 
   async function checkPerformanceReadiness() {
@@ -472,45 +452,9 @@ export function DeveloperWorkspace({
             INSECURE DEVELOPMENT CONNECTION - local synthetic and Android-style testing only.
           </p>
           <p className="view-description">
-            127.0.0.1 allows only same-PC connections. A LAN IP such as 192.168.1.78 allows phone
-            access on the same network. 0.0.0.0 listens on all interfaces and is development-only.
+            The Host selects its approved development ports and a phone-reachable address. Starting
+            the listener may open the trusted local network to insecure plaintext traffic.
           </p>
-          <div className="developer-form-grid">
-            <label>
-              Bind address
-              <input
-                className="microphone-select"
-                type="text"
-                value={developmentBindAddress}
-                disabled={developmentControlsDisabled}
-                onChange={(event) => setDevelopmentBindAddress(event.target.value)}
-              />
-            </label>
-            <label>
-              TCP port
-              <input
-                className="microphone-select"
-                type="number"
-                min={1}
-                max={65535}
-                value={developmentTcpPort}
-                disabled={developmentControlsDisabled}
-                onChange={(event) => setDevelopmentTcpPort(event.target.value)}
-              />
-            </label>
-            <label>
-              UDP port
-              <input
-                className="microphone-select"
-                type="number"
-                min={1}
-                max={65535}
-                value={developmentUdpPort}
-                disabled={developmentControlsDisabled}
-                onChange={(event) => setDevelopmentUdpPort(event.target.value)}
-              />
-            </label>
-          </div>
           <div className="microphone-test-actions">
             <button
               className="microphone-test-button"
@@ -534,16 +478,32 @@ export function DeveloperWorkspace({
               Stop Listener
             </button>
           </div>
-          {developmentFormError ? (
+          {development.phonePairingCandidates.length > 0 ? (
+            <div className="microphone-test-actions" aria-label="Choose trusted network">
+              {development.phonePairingCandidates.map((candidate) => (
+                <button
+                  className="microphone-test-button"
+                  type="button"
+                  key={candidate.id}
+                  disabled={development.pendingAction !== null}
+                  onClick={() => void development.selectPhonePairingAddress(candidate.id)}
+                >
+                  {candidate.interfaceName}: {candidate.address}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {development.error ? (
             <p className="microphone-error" role="alert">
-              {developmentFormError}
+              {development.error}
             </p>
           ) : null}
           <DiagnosticText>
             <p>
               Listener: {readableState(development.status.listenerState)} / TCP{" "}
-              {development.status.tcpPort} / UDP {development.status.udpPort} /{" "}
-              {development.status.bindAddress}
+              {development.status.tcpPort} / UDP {development.status.udpPort} / Bound{" "}
+              {development.status.bindAddress} / Advertised{" "}
+              {development.status.advertisedAddress ?? "None"}
             </p>
             <p>
               Client: {development.status.connectedClientName ?? "None"} / Source:{" "}
@@ -563,9 +523,9 @@ export function DeveloperWorkspace({
               {development.diagnostics.audioHandoffDroppedFrames}
             </p>
           </DiagnosticText>
-          {development.error || development.status.error ? (
+          {development.status.error ? (
             <p className="microphone-error" role="alert">
-              {development.error ?? development.status.error}
+              {development.status.error}
             </p>
           ) : null}
         </section>
@@ -811,15 +771,4 @@ function readableState(value: string) {
     .split("-")
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
-}
-
-function parseDevelopmentPort(value: string) {
-  if (!/^\d+$/.test(value.trim())) {
-    return null;
-  }
-  const port = Number(value);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    return null;
-  }
-  return port;
 }
