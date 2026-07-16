@@ -534,6 +534,20 @@ Avoid repeatedly running identical validation without new changes.
 
 Validation exists to increase confidence rather than consume time.
 
+## Validation timeouts
+
+If any individual validation command exceeds five minutes:
+
+1. Stop that command.
+2. Report:
+   - command executed;
+   - elapsed time;
+   - likely cause;
+   - whether the command is mandatory or optional.
+3. Continue only with remaining independent mandatory validation where safe.
+4. Do not retry the same command without an explicit change that could alter the outcome.
+5. Optional housekeeping commands (for example Git refresh/index maintenance) must be skipped if they become slow or unstable.
+
 When reporting validation:
 
 - report what was executed;
