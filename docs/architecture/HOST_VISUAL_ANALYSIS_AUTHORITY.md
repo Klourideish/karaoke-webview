@@ -1,8 +1,8 @@
 # Host Visual Analysis Authority
 
-**Status:** Approved
+**Status:** Approved - Implementation Deferred
 
-**Implementation:** P6-006B
+**Implementation:** Future presentation-focused phase
 
 Accepted Platform and Host RFCs remain authoritative. This document defines the approved implementation boundary for derived visual analysis. It does not transfer authority from Playback, Performance, Queue, the media library, or lyrics.
 
@@ -208,10 +208,35 @@ Manual verification must cover countdown-to-playback presentation, pause, resume
 
 ## Implementation Gate
 
-This document approves the architecture only. Production implementation requires explicit acceptance to proceed.
+No production implementation is active. Reopening requires the conditions below and explicit approval for a future presentation-focused phase.
 
-After implementation and verification, update the document status to:
+## Deferral Decision
 
-```text
-Status: Implemented
-```
+- The architecture remains approved. No authority flaw was found in the design.
+- The current prototype was manually evaluated and intentionally removed from the product.
+- The Web Audio approach failed because the Tauri asset origin was not readable by Web Audio under CORS rules. Rerouting the persistent media element through `MediaElementAudioSource` silenced audible playback, so that approach was removed.
+- The Host-side Symphonia approach successfully isolated analysis from audible Playback, but its initial amplitude envelope did not provide sufficient performer-facing value.
+- The envelope reacted too weakly to representative music and conflicted with the calm Performance canvas visual language.
+- Further visual-analysis iteration currently offers less value than completing core workflow, romanisation, and hardening work.
+- Implementation is deferred because of product value and presentation quality, not because the approved architecture is invalid.
+
+## Conditions For Reopening
+
+- The project has entered a dedicated presentation-enhancement phase.
+- Representative songs and expected visual behavior are defined.
+- A measurable acceptance target exists for responsiveness and visual quality.
+- The approved Playback-isolation boundary remains intact.
+- Binary size, native build tooling, and third-party licence obligations are accepted.
+- The work can be completed without delaying higher-value operator or performer capabilities.
+
+Incremental or chunked analysis remains future work and is not a prerequisite for reopening the bounded implementation described here.
+
+## Preserved Future Boundary
+
+Any future implementation must:
+
+- analyse only authoritative accepted media;
+- remain independent of audible Playback;
+- expose bounded immutable presentation data;
+- fail independently without affecting Playback, Performance, Queue, or lyrics;
+- never become timing, transport, seeking, synchronization, or lifecycle authority.

@@ -24,6 +24,10 @@ Phone interaction is a core product direction, not an optional add-on. Sequence 
 - complete current lyric fill lead adjustment
 - lyric presentation foundations
 
+## Deferred
+
+- **P6-006B - Host Visual Analysis:** Approved architecture retained; current implementation removed after product and presentation evaluation.
+
 ## Core Next
 
 - extend participant onboarding with development phone pairing

@@ -43,10 +43,7 @@ describe("PerformWorkspace", () => {
     expect(screen.queryByText(song.artist)).not.toBeInTheDocument();
     expect(screen.queryByText("Playing")).not.toBeInTheDocument();
     expect(screen.queryByText("performance-1")).not.toBeInTheDocument();
-    expect(container.querySelector("[data-waveform-reserved='true']")).toHaveAttribute(
-      "data-visualizer-active",
-      "false",
-    );
+    expect(container.querySelector("[data-waveform-reserved]")).not.toBeInTheDocument();
   });
 
   it("renders 3, 2, and 1 only from authoritative countdown projections", () => {
@@ -121,7 +118,7 @@ describe("PerformWorkspace", () => {
     expect(screen.queryByText("playback-failed")).not.toBeInTheDocument();
   });
 
-  it("keeps the footer inert without Web Audio attachment or recurring frame work", () => {
+  it("renders no visualizer or reserved footer and starts no animation work", () => {
     const audioContext = vi.fn();
     const animationFrame = vi.fn();
     vi.stubGlobal("AudioContext", audioContext);
@@ -137,10 +134,8 @@ describe("PerformWorkspace", () => {
       </StrictMode>,
     );
 
-    expect(container.querySelector("[data-waveform-reserved='true']")).toHaveAttribute(
-      "data-visualizer-active",
-      "false",
-    );
+    expect(container.querySelector("[data-waveform-reserved]")).not.toBeInTheDocument();
+    expect(container.querySelector(".performance-waveform-reserve")).not.toBeInTheDocument();
     expect(container.querySelector("canvas")).not.toBeInTheDocument();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(audioContext).not.toHaveBeenCalled();

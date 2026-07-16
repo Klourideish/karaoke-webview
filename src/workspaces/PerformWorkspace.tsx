@@ -119,12 +119,6 @@ export function PerformWorkspace({
             </p>
           )}
         </div>
-        <div
-          aria-hidden="true"
-          className="performance-waveform-reserve"
-          data-visualizer-active="false"
-          data-waveform-reserved="true"
-        />
       </section>
     </section>
   );
