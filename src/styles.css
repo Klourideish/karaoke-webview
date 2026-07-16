@@ -119,6 +119,61 @@ button {
   text-transform: uppercase;
 }
 
+.brand-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.brand-title-row h1 {
+  min-width: 0;
+}
+
+.fullscreen-control-group {
+  display: grid;
+  flex: none;
+  gap: 4px;
+  justify-items: end;
+}
+
+.fullscreen-toggle {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--accent-strong);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fullscreen-toggle:hover:not(:disabled) {
+  border-color: var(--accent-strong);
+  background: var(--surface-2);
+}
+
+.fullscreen-toggle:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.fullscreen-toggle:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.fullscreen-error {
+  max-width: 180px;
+  color: var(--text);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-align: right;
+}
+
 h1,
 h2,
 h3,

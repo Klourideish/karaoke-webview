@@ -5,14 +5,18 @@ import {
   LYRIC_OFFSET_MIN_MS,
   LYRIC_OFFSET_STEP_MS,
 } from "../lyricOffset";
+import { FullscreenControl } from "./FullscreenControl";
+import type { FullscreenWindowController } from "./useFullscreenWindow";
 
 export function TopInfoBar({
   audioPlayer,
+  fullscreen,
   lyricOffsetMs,
   onAdjustLyricOffset,
   onResetLyricOffset,
 }: {
   audioPlayer: AudioPlayer;
+  fullscreen: FullscreenWindowController;
   lyricOffsetMs: number;
   onAdjustLyricOffset: (deltaMs: number) => void;
   onResetLyricOffset: () => void;
@@ -23,7 +27,10 @@ export function TopInfoBar({
     <header className="top-info-bar" aria-label="Application overview">
       <section className="brand-region" aria-labelledby="app-title">
         <p className="region-label">Application</p>
-        <h1 id="app-title">Karaoke Webview</h1>
+        <div className="brand-title-row">
+          <h1 id="app-title">Karaoke Webview</h1>
+          <FullscreenControl fullscreen={fullscreen} />
+        </div>
       </section>
 
       <section className="song-region" aria-label="Current song information">

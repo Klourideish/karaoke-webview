@@ -23,6 +23,10 @@ const tauriMocks = vi.hoisted(() => ({
   open: vi.fn(),
 }));
 const tauriEventMocks = vi.hoisted(() => ({ listen: vi.fn() }));
+const tauriWindowMocks = vi.hoisted(() => ({
+  isFullscreen: vi.fn(),
+  setFullscreen: vi.fn(),
+}));
 
 let nextAnimationFrameId = 1;
 let animationFrameCallbacks = new Map<number, FrameRequestCallback>();
@@ -38,6 +42,10 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 vi.mock("@tauri-apps/api/event", () => ({
   listen: tauriEventMocks.listen,
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => tauriWindowMocks,
 }));
 
 const emptyScanResult: LibraryScanResult = {
@@ -1029,6 +1037,10 @@ beforeEach(() => {
   tauriMocks.open.mockResolvedValue(null);
   tauriEventMocks.listen.mockReset();
   tauriEventMocks.listen.mockResolvedValue(() => undefined);
+  tauriWindowMocks.isFullscreen.mockReset();
+  tauriWindowMocks.isFullscreen.mockResolvedValue(false);
+  tauriWindowMocks.setFullscreen.mockReset();
+  tauriWindowMocks.setFullscreen.mockResolvedValue(undefined);
   playbackProjectionState = structuredClone(idlePlaybackProjection);
   performanceProjectionState = structuredClone(emptyPerformanceProjection);
   playbackSongs = populatedScanResult.songs;

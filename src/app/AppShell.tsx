@@ -24,6 +24,7 @@ import { QueuePanel } from "./QueuePanel";
 import { SingerBar, type Singer } from "./SingerBar";
 import { TabRail } from "./TabRail";
 import { TopInfoBar } from "./TopInfoBar";
+import { useFullscreenWindow } from "./useFullscreenWindow";
 import type { AppTab, TabDefinition } from "./appTabs";
 import { buildSingerReadinessProjections } from "./singerReadiness";
 import { useQueue } from "../queue/useQueue";
@@ -63,6 +64,7 @@ export function AppShell({
 }) {
   const [syncOpen, setSyncOpen] = useState(false);
   const [lyricOffsetMs, setLyricOffsetMs] = useState(0);
+  const fullscreen = useFullscreenWindow();
   const lyrics = useSongLyrics(audioPlayer.currentSong);
   const microphones = useLocalMicrophones();
   const microphoneAssignments = useMicrophoneAssignments(singers);
@@ -115,6 +117,7 @@ export function AppShell({
     <div className="app-shell">
       <TopInfoBar
         audioPlayer={audioPlayer}
+        fullscreen={fullscreen}
         lyricOffsetMs={lyricOffsetMs}
         onAdjustLyricOffset={(deltaMs) => {
           setLyricOffsetMs((current) => adjustLyricOffsetMs(current, deltaMs));
