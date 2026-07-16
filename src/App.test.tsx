@@ -279,6 +279,7 @@ let nextSessionSingerNumber = 1;
 let playbackProjectionState: PlaybackProjection = structuredClone(idlePlaybackProjection);
 let performanceProjectionState: PerformanceProjection = structuredClone(emptyPerformanceProjection);
 let playbackSongs: MediaSong[] = [];
+let savedLyricOffsets = new Map<string, number>();
 let playbackLyrics: LyricDocument;
 
 const disconnectedRecoveryState = {
@@ -686,6 +687,7 @@ function mockInvokeWith({
     (
       command: string,
       args?: {
+        offsetMs?: number;
         songId?: string;
         sourceId?: string;
         singerId?: string;
@@ -703,6 +705,37 @@ function mockInvokeWith({
     ) => {
       const playbackResponse = mockPlaybackInvoke(command, args);
       if (playbackResponse) return playbackResponse;
+      if (command === "get_song_lyric_timing") {
+        const songId = args?.songId ?? "";
+        return Promise.resolve({
+          songId,
+          savedOffsetMs: savedLyricOffsets.get(songId) ?? null,
+          persistenceStatus: "loaded",
+          lastError: null,
+        });
+      }
+
+      if (command === "save_song_lyric_offset") {
+        const songId = args?.songId ?? "";
+        savedLyricOffsets.set(songId, args?.offsetMs ?? 0);
+        return Promise.resolve({
+          songId,
+          savedOffsetMs: savedLyricOffsets.get(songId) ?? null,
+          persistenceStatus: "saved",
+          lastError: null,
+        });
+      }
+
+      if (command === "remove_song_lyric_offset") {
+        const songId = args?.songId ?? "";
+        savedLyricOffsets.delete(songId);
+        return Promise.resolve({
+          songId,
+          savedOffsetMs: null,
+          persistenceStatus: "removed",
+          lastError: null,
+        });
+      }
       if (command === "load_library_settings") {
         return Promise.resolve({ libraryRoot: loadRoot });
       }
@@ -1045,6 +1078,7 @@ beforeEach(() => {
   performanceProjectionState = structuredClone(emptyPerformanceProjection);
   playbackSongs = populatedScanResult.songs;
   playbackLyrics = populatedLyricDocument;
+  savedLyricOffsets = new Map();
   sessionSingerState = [];
   nextSessionSingerNumber = 1;
   nextAnimationFrameId = 1;
@@ -1159,9 +1193,13 @@ describe("App shell", () => {
     await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith("load_library_settings"));
   });
 
-  it("provides bounded accessible session-local lyric offset controls", async () => {
+  it("provides bounded accessible temporary lyric offset controls", async () => {
     const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByRole("button", { name: /The Beatles/ });
+    await playSongFromLibrary(user, "Hey Jude");
 
     const earlier = screen.getByRole("button", {
       name: "Show lyrics 100 milliseconds earlier",
@@ -1169,19 +1207,71 @@ describe("App shell", () => {
     const later = screen.getByRole("button", {
       name: "Show lyrics 100 milliseconds later",
     });
-    const reset = screen.getByRole("button", { name: "Reset lyric offset" });
-    expect(screen.getByRole("status", { name: "Current lyric offset" })).toHaveTextContent("0 ms");
+    const reset = screen.getByRole("button", { name: "Reset temporary lyric adjustment" });
+    expect(screen.getByRole("status", { name: "Temporary lyric adjustment" })).toHaveTextContent(
+      "0 ms",
+    );
     expect(reset).toBeDisabled();
 
     for (let step = 0; step < 30; step += 1) fireEvent.click(earlier);
-    expect(screen.getByRole("status", { name: "Current lyric offset" })).toHaveTextContent(
+    expect(screen.getByRole("status", { name: "Temporary lyric adjustment" })).toHaveTextContent(
       "-3000 ms",
     );
     expect(earlier).toBeDisabled();
     expect(later).toBeEnabled();
 
     await user.click(reset);
-    expect(screen.getByRole("status", { name: "Current lyric offset" })).toHaveTextContent("0 ms");
+    expect(screen.getByRole("status", { name: "Temporary lyric adjustment" })).toHaveTextContent(
+      "0 ms",
+    );
+  });
+
+  it("renders and explicitly persists saved, temporary, and effective song timing", async () => {
+    const user = userEvent.setup();
+    mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
+    savedLyricOffsets.set("song-a", -700);
+    render(<App />);
+    await openLibraryWorkspace(user);
+    await screen.findByRole("button", { name: /The Beatles/ });
+    await playSongFromLibrary(user, "Hey Jude");
+
+    expect(
+      await screen.findByRole("status", { name: "Saved song lyric offset" }),
+    ).toHaveTextContent("-700 ms");
+    expect(screen.getByRole("status", { name: "Temporary lyric adjustment" })).toHaveTextContent(
+      "0 ms",
+    );
+    expect(screen.getByRole("status", { name: "Effective lyric offset" })).toHaveTextContent(
+      "-700 ms",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Show lyrics 100 milliseconds later" }));
+    expect(screen.getByRole("status", { name: "Effective lyric offset" })).toHaveTextContent(
+      "-600 ms",
+    );
+    await user.click(screen.getByRole("button", { name: "Save for this song" }));
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("save_song_lyric_offset", {
+        songId: "song-a",
+        offsetMs: -600,
+      }),
+    );
+    expect(screen.getByRole("status", { name: "Saved song lyric offset" })).toHaveTextContent(
+      "-600 ms",
+    );
+    expect(screen.getByRole("status", { name: "Temporary lyric adjustment" })).toHaveTextContent(
+      "0 ms",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Reset song timing" }));
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("remove_song_lyric_offset", {
+        songId: "song-a",
+      }),
+    );
+    expect(screen.getByRole("status", { name: "Saved song lyric offset" })).toHaveTextContent(
+      "Not saved",
+    );
   });
 
   it("renders readable horizontal navigation labels", async () => {
@@ -3261,6 +3351,8 @@ describe("Library workspace", () => {
       "Hey Jude",
     );
     expect(getAudioElement().src).toContain("The%20Beatles%20-%20Hey%20Jude.opus");
+    expect(getAudioElement()).not.toHaveAttribute("crossorigin");
+    expect(document.querySelector("canvas.performance-visualizer")).not.toBeInTheDocument();
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
     expect(tauriMocks.invoke).toHaveBeenCalledWith("report_playback_started", {
       request: { attemptId: "playback-attempt-1" },
@@ -3588,7 +3680,7 @@ describe("Library workspace", () => {
     expect(
       screen.getByText("Yesterday all my troubles").closest(".lyric-line-row"),
     ).toHaveAttribute("data-presentation-lifecycle", "entering");
-    expect(screen.getByRole("status", { name: "Current lyric offset" })).toHaveTextContent(
+    expect(screen.getByRole("status", { name: "Effective lyric offset" })).toHaveTextContent(
       "+500 ms",
     );
 
@@ -3613,11 +3705,11 @@ describe("Library workspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Library" }));
     await user.click(screen.getByRole("button", { name: "Performance" }));
-    expect(screen.getByRole("status", { name: "Current lyric offset" })).toHaveTextContent(
+    expect(screen.getByRole("status", { name: "Effective lyric offset" })).toHaveTextContent(
       "+500 ms",
     );
 
-    await user.click(screen.getByRole("button", { name: "Reset lyric offset" }));
+    await user.click(screen.getByRole("button", { name: "Reset temporary lyric adjustment" }));
     await waitFor(() =>
       expect(container.querySelector(".lyric-line-stack")).toHaveAttribute(
         "data-effective-time-ms",
@@ -4051,7 +4143,7 @@ describe("Library workspace", () => {
     expect(screen.getByText("Seemed so far away")).toBeInTheDocument();
   });
 
-  it("shows lyric parser failure without blocking playback", async () => {
+  it("shows a concise no-lyrics state without blocking playback", async () => {
     const user = userEvent.setup();
     mockInvokeWith({ loadRoot: "C:\\Music", scanResult: populatedScanResult });
     tauriMocks.invoke.mockImplementation((command: string, args?: PlaybackMockArgs) => {
@@ -4067,9 +4159,10 @@ describe("Library workspace", () => {
     await playSongFromLibrary(user, "Hey Jude");
     await user.click(screen.getByRole("button", { name: "Performance" }));
 
+    expect(await screen.findByText("Lyrics are not available for this song.")).toBeInTheDocument();
     expect(
-      await screen.findByText("The lyric file is not a supported TTML document."),
-    ).toBeInTheDocument();
+      screen.queryByText("The lyric file is not a supported TTML document."),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("contentinfo", { name: "Media transport" })).toHaveTextContent(
       "Hey Jude",
     );
@@ -4478,9 +4571,11 @@ describe("Singer shell", () => {
     expect(request).not.toHaveProperty("lyricPath");
 
     await user.click(screen.getByRole("button", { name: "Performance" }));
-    expect(await screen.findByText("Dad")).toBeInTheDocument();
-    expect(screen.getByText("Hey Jude")).toBeInTheDocument();
-    expect(screen.getByText("Starting in 3")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Dad, singer" })).toBeInTheDocument();
+    expect(screen.queryByText("Hey Jude")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("timer", { name: "Performance starts in 3 seconds" }),
+    ).toHaveTextContent("3");
   });
 
   it("does not duplicate a Performance mutation under StrictMode", async () => {

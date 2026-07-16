@@ -1,6 +1,7 @@
 mod capture;
 mod development_pairing;
 mod development_protocol;
+mod lyric_timing_preferences;
 mod lyrics;
 mod media_library;
 mod microphones;
@@ -41,6 +42,7 @@ pub fn run() {
         .manage(session_singers::SessionSingerRegistry::default())
         .manage(participant_commit::ParticipantCommitCoordinator::default())
         .manage(media_library::MediaLibraryRefreshCoordinator::default())
+        .manage(lyric_timing_preferences::LyricTimingPreferenceCoordinator::default())
         .manage(playback::HostPlaybackCoordinator::default())
         .manage(std::sync::Arc::clone(&performance))
         .manage(std::sync::Arc::clone(&queue))
@@ -84,6 +86,9 @@ pub fn run() {
             microphones::list_microphone_assignments,
             microphones::list_microphone_waiting_states,
             lyrics::parse_song_lyrics,
+            lyric_timing_preferences::get_song_lyric_timing,
+            lyric_timing_preferences::save_song_lyric_offset,
+            lyric_timing_preferences::remove_song_lyric_offset,
             playback::get_playback_projection,
             playback::request_song_playback,
             playback::request_playback_pause,

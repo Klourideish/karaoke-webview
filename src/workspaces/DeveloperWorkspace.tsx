@@ -17,6 +17,8 @@ import type { useMediaLibrary } from "../media-library/useMediaLibrary";
 import type { AudioPlayer } from "../audioPlayer";
 import type { PerformanceController } from "../performance/usePerformance";
 import type { useQueue } from "../queue/useQueue";
+import { formatLyricOffset } from "../lyricOffset";
+import type { useSongLyricTiming } from "../useSongLyricTiming";
 
 export function DeveloperWorkspace({
   audioPlayer,
@@ -26,6 +28,7 @@ export function DeveloperWorkspace({
   discovery,
   participantCommitDiagnostics,
   mediaLibrary,
+  lyricTiming,
   performance,
   recovery,
   singers,
@@ -38,6 +41,7 @@ export function DeveloperWorkspace({
   discovery: ReturnType<typeof useLocalMicrophones>;
   participantCommitDiagnostics: ReturnType<typeof useParticipantCommitDiagnostics>;
   mediaLibrary: ReturnType<typeof useMediaLibrary>;
+  lyricTiming: ReturnType<typeof useSongLyricTiming>;
   performance: PerformanceController;
   recovery: ReturnType<typeof useMicrophoneRecovery>;
   singers: Singer[];
@@ -297,6 +301,16 @@ export function DeveloperWorkspace({
             <p>Last completed: {mediaLibrary.scanResult?.completedAt ?? "Never"}</p>
             {mediaLibrary.statusMessage ? <p>Operation: {mediaLibrary.statusMessage}</p> : null}
             {mediaLibrary.error ? <p>Last error: {mediaLibrary.error}</p> : null}
+          </DiagnosticText>
+          <DiagnosticText>
+            <p>Lyric timing song: {lyricTiming.songId ?? "None"}</p>
+            <p>
+              Saved: {formatLyricOffset(lyricTiming.savedOffsetMs ?? 0)} / Temporary:{" "}
+              {formatLyricOffset(lyricTiming.temporaryOffsetMs)} / Effective:{" "}
+              {formatLyricOffset(lyricTiming.effectiveOffsetMs)}
+            </p>
+            <p>Lyric timing persistence: {lyricTiming.persistenceStatus}</p>
+            <p>Lyric timing error: {lyricTiming.error ?? "None"}</p>
           </DiagnosticText>
           <LibraryDiagnostics issues={mediaLibrary.scanResult?.issues ?? []} />
           {mediaLibrary.scanResult?.songs.length ? (

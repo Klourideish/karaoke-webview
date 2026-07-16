@@ -12,6 +12,7 @@ Phone interaction is a core product direction, not an optional add-on. Sequence 
 - classic fragment fill
 - normalized inline TTML spacing and deterministic half-open lyric timing
 - session-local signed lyric offset with operator controls
+- Host-persisted per-song lyric timing composed with a temporary session adjustment
 - Host-owned playback authority with stable indexed song lookup and attempt-scoped adapter reports
 - Host-owned Performance authority with RFC-P-003 lifecycle, readiness, countdown, playback linkage, and results deadline
 - Host-owned Queue prototype with deterministic ordering, bounded voting, and Performance-owned progression

@@ -223,6 +223,30 @@ h3 {
   color: var(--muted);
 }
 
+.offset-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.offset-summary > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.offset-summary output {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .offset-controls button,
 .offset-controls output {
   display: grid;
@@ -264,6 +288,45 @@ h3 {
 
 .offset-controls .offset-reset-button {
   padding: 0 var(--space-2);
+}
+
+.offset-persistence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.offset-persistence-actions button {
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.offset-persistence-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.offset-persistence-actions button:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.offset-persistence-actions button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.offset-error {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 0.72rem;
 }
 
 .session-layout {
@@ -1340,40 +1403,84 @@ h3 {
 
 .performance-stage {
   display: grid;
-  align-content: center;
-  justify-items: center;
+  grid-template-rows: auto minmax(0, 1fr) clamp(56px, 9vh, 104px);
+  align-content: stretch;
+  justify-items: stretch;
   min-width: 0;
   min-height: 0;
   flex: 1;
   padding: clamp(20px, 1.8vw, 44px);
-  overflow: auto;
+  overflow: hidden;
   text-align: center;
 }
 
-.performance-stage h3 {
-  font-size: clamp(1.7rem, 1.25rem + 0.9vw, 3rem);
-}
-
-.performance-authority-summary {
+.performance-singer-heading {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  align-items: baseline;
-  justify-content: center;
-  color: var(--muted);
+  grid-row: 1;
+  gap: var(--space-3);
+  align-items: center;
+  justify-self: start;
+  max-width: 100%;
+  color: var(--text);
+  font-size: clamp(1.8rem, 1.35rem + 1vw, 3.25rem);
+  font-weight: 750;
+  text-align: left;
 }
 
-.performance-authority-summary strong {
-  color: var(--text);
+.performance-singer-heading > span:not([aria-hidden="true"]):not(.visually-hidden) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.performance-canvas-body {
+  display: grid;
+  grid-row: 2;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.performance-stage .performance-countdown {
+  margin: 0;
+  color: var(--accent-strong);
+  font-family: "Arial Rounded MT Bold", "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  font-size: clamp(9rem, 26vmin, 24rem);
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 3px 14px rgb(0 0 0 / 35%);
+  transform-origin: center;
+  animation: performance-countdown-enter 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes performance-countdown-enter {
+  from {
+    opacity: 0.28;
+    transform: scale(0.94);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.performance-state-message {
+  max-width: 42rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(1.1rem, 0.9rem + 0.5vw, 1.6rem);
+  line-height: 1.45;
 }
 
 .lyric-display {
   display: grid;
-  gap: var(--space-5);
+  align-self: start;
   width: min(100%, 1400px);
+  padding-top: clamp(12px, 3vh, 42px);
 }
 
-.lyric-song-status,
 .lyric-error {
   margin: 0;
   color: var(--muted);
@@ -1391,7 +1498,16 @@ h3 {
     minmax(3rem, auto);
   gap: clamp(0.5rem, 1.2vh, 1rem);
   align-items: center;
-  min-height: clamp(220px, 32vh, 520px);
+  min-height: clamp(240px, 42vh, 620px);
+}
+
+.performance-waveform-reserve {
+  display: grid;
+  grid-row: 3;
+  place-items: center;
+  width: 100%;
+  min-height: 0;
+  pointer-events: none;
 }
 
 .performance-stage .lyric-line {
@@ -1791,6 +1907,10 @@ h3 {
   .lyric-line-row {
     transition: none;
   }
+
+  .performance-countdown {
+    animation: none;
+  }
 }
 
 /* Queue Workspace & Panel styling */
@@ -1940,13 +2060,6 @@ h3 {
 
 .queue-add-error {
   color: #ffc9c2;
-}
-
-.performance-queue-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  color: var(--muted);
 }
 
 @media (max-width: 960px) {

@@ -13,11 +13,20 @@ export function adjustLyricOffsetMs(offsetMs: number, deltaMs: number) {
 
 export function effectiveLyricTimeMs(playbackTimeMs: number, offsetMs: number) {
   const safePlaybackTime = Number.isFinite(playbackTimeMs) ? playbackTimeMs : 0;
-  return Math.max(0, safePlaybackTime - clampLyricOffsetMs(offsetMs));
+  const safeOffset = Number.isFinite(offsetMs) ? Math.round(offsetMs) : 0;
+  return Math.max(0, safePlaybackTime - safeOffset);
+}
+
+export function totalLyricOffsetMs(savedSongOffsetMs: number, temporarySessionOffsetMs: number) {
+  const saved = Number.isFinite(savedSongOffsetMs) ? Math.round(savedSongOffsetMs) : 0;
+  const temporary = Number.isFinite(temporarySessionOffsetMs)
+    ? Math.round(temporarySessionOffsetMs)
+    : 0;
+  return saved + temporary;
 }
 
 export function formatLyricOffset(offsetMs: number) {
-  const value = clampLyricOffsetMs(offsetMs);
+  const value = Number.isFinite(offsetMs) ? Math.round(offsetMs) : 0;
   if (value === 0) return "0 ms";
   return `${value > 0 ? "+" : ""}${value} ms`;
 }

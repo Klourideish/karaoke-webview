@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { AudioPlayer } from "../audioPlayer";
-import { adjustLyricOffsetMs } from "../lyricOffset";
 import { useMediaLibrary } from "../media-library/useMediaLibrary";
 import { useDiagnosticCapture } from "../microphones/useDiagnosticCapture";
 import { useLocalMicrophones } from "../microphones/useLocalMicrophones";
@@ -14,6 +13,7 @@ import { useParticipantCommitDiagnostics } from "../session-singers/useParticipa
 import { SyncDialog } from "../sync/SyncDialog";
 import { eligiblePhysicalMicrophones } from "../sync/types";
 import { useSongLyrics } from "../useSongLyrics";
+import { useSongLyricTiming } from "../useSongLyricTiming";
 import { DeveloperWorkspace } from "../workspaces/DeveloperWorkspace";
 import { LibraryWorkspace } from "../workspaces/LibraryWorkspace";
 import { MicrophoneWorkspace } from "../workspaces/MicrophoneWorkspace";
@@ -63,9 +63,9 @@ export function AppShell({
   singers: Singer[];
 }) {
   const [syncOpen, setSyncOpen] = useState(false);
-  const [lyricOffsetMs, setLyricOffsetMs] = useState(0);
   const fullscreen = useFullscreenWindow();
   const lyrics = useSongLyrics(audioPlayer.currentSong);
+  const lyricTiming = useSongLyricTiming(audioPlayer.currentSong?.id ?? null);
   const microphones = useLocalMicrophones();
   const microphoneAssignments = useMicrophoneAssignments(singers);
   const microphoneChannels = useMicrophoneChannels(microphones.sources);
@@ -115,15 +115,7 @@ export function AppShell({
 
   return (
     <div className="app-shell">
-      <TopInfoBar
-        audioPlayer={audioPlayer}
-        fullscreen={fullscreen}
-        lyricOffsetMs={lyricOffsetMs}
-        onAdjustLyricOffset={(deltaMs) => {
-          setLyricOffsetMs((current) => adjustLyricOffsetMs(current, deltaMs));
-        }}
-        onResetLyricOffset={() => setLyricOffsetMs(0)}
-      />
+      <TopInfoBar audioPlayer={audioPlayer} fullscreen={fullscreen} lyricTiming={lyricTiming} />
 
       <div className="session-layout">
         <div className="nav-spacer" aria-hidden="true" />
@@ -150,7 +142,7 @@ export function AppShell({
             microphoneRecovery={microphoneRecovery}
             diagnosticCapture={diagnosticCapture}
             participantCommitDiagnostics={participantCommitDiagnostics}
-            lyricOffsetMs={lyricOffsetMs}
+            lyricTiming={lyricTiming}
             onSelectTab={onSelectTab}
             singers={singers}
             view={activeView}
@@ -194,7 +186,7 @@ function MainContent({
   microphoneRecovery,
   diagnosticCapture,
   participantCommitDiagnostics,
-  lyricOffsetMs,
+  lyricTiming,
   onSelectTab,
   singers,
   view,
@@ -210,7 +202,7 @@ function MainContent({
   microphoneRecovery: ReturnType<typeof useMicrophoneRecovery>;
   diagnosticCapture: ReturnType<typeof useDiagnosticCapture>;
   participantCommitDiagnostics: ReturnType<typeof useParticipantCommitDiagnostics>;
-  lyricOffsetMs: number;
+  lyricTiming: ReturnType<typeof useSongLyricTiming>;
   onSelectTab: (tab: AppTab) => void;
   singers: Singer[];
   view: TabDefinition;
@@ -220,10 +212,9 @@ function MainContent({
     return (
       <PerformWorkspace
         audioPlayer={audioPlayer}
-        lyricOffsetMs={lyricOffsetMs}
+        lyricOffsetMs={lyricTiming.effectiveOffsetMs}
         lyrics={lyrics}
         performance={performance}
-        queue={queue.projection}
       />
     );
   }
@@ -266,6 +257,7 @@ function MainContent({
         discovery={microphones}
         participantCommitDiagnostics={participantCommitDiagnostics}
         mediaLibrary={mediaLibrary}
+        lyricTiming={lyricTiming}
         performance={performance}
         recovery={microphoneRecovery}
         singers={singers}

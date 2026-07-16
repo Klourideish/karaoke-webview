@@ -4,10 +4,7 @@ import { effectiveLyricTimeMs } from "../lyricOffset";
 import { presentationLineProgress, type LyricPresentationRow } from "../lyricPresentation";
 import { lyricFragmentProgress } from "../lyricTiming";
 import type { LyricLine, LyricSegment } from "../lyrics";
-import { playbackStatusLabel } from "../player/playbackFormatting";
-import type { PerformanceDetailsProjection } from "../performance/types";
 import type { PerformanceController } from "../performance/usePerformance";
-import type { QueueProjection } from "../queue/types";
 import { useLyricPlaybackClock } from "../useLyricPlaybackClock";
 import type { SongLyricsState } from "../useSongLyrics";
 
@@ -16,14 +13,13 @@ export function PerformWorkspace({
   lyricOffsetMs,
   lyrics,
   performance,
-  queue,
 }: {
   audioPlayer: AudioPlayer;
   lyricOffsetMs: number;
   lyrics: SongLyricsState;
   performance: PerformanceController;
-  queue: QueueProjection;
 }) {
+  const activePerformance = performance.projection.active;
   const currentSong = audioPlayer.currentSong;
   const lyricSnapshot = useLyricPlaybackClock({
     audioPlayer,
@@ -36,6 +32,13 @@ export function PerformWorkspace({
   const lyricState = lyricSnapshot?.state ?? null;
   const presentationRows = lyricSnapshot?.presentationRows ?? [];
   const currentRow = presentationRows.find((row) => row.role === "current") ?? null;
+  const countdownNumber = performanceCountdownNumber(
+    activePerformance?.state,
+    activePerformance?.countdownRemainingMs,
+  );
+  const showLyrics = Boolean(
+    currentSong && (!activePerformance || activePerformance.state === "playing"),
+  );
 
   return (
     <section className="perform-view">
@@ -43,90 +46,128 @@ export function PerformWorkspace({
         Performance
       </h2>
 
-      <section className="performance-stage" aria-labelledby="performance-stage-title">
-        <h3 id="performance-stage-title">Lyrics presentation</h3>
-        {performance.projection.active ? (
-          <div className="performance-authority-summary" aria-live="polite">
-            <strong>{performance.projection.active.performer.displayName}</strong>
-            <span>{performance.projection.active.song.title}</span>
-            <span>{performanceStatus(performance.projection.active)}</span>
-          </div>
+      <section className="performance-stage" aria-label="Performance canvas">
+        {activePerformance ? (
+          <h3
+            aria-label={`${activePerformance.performer.displayName}, singer`}
+            className="performance-singer-heading"
+          >
+            <span aria-hidden="true">🎤</span>
+            <span>{activePerformance.performer.displayName}</span>
+          </h3>
         ) : null}
-        {performance.error ? (
-          <p className="lyric-error" role="alert">
-            {performance.error}
-          </p>
-        ) : null}
-        {queue.current || queue.queued.length > 0 ? (
-          <div className="performance-queue-summary" aria-label="Queue summary">
-            {queue.current ? (
-              <span>
-                Current: {queue.current.entry.songTitle} ·{" "}
-                {queue.current.entry.requesterDisplayName}
-              </span>
-            ) : null}
-            {queue.queued.slice(0, 2).map((entry) => (
-              <span key={entry.id}>
-                Next: {entry.songTitle} · {entry.requesterDisplayName}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        {currentSong ? (
-          <div className="lyric-display" aria-live="polite">
-            <p className="lyric-song-status">
-              {currentSong.artist || "Artist not specified"} - {currentSong.title} ·{" "}
-              {playbackStatusLabel(audioPlayer.status)}
+        <div className="performance-canvas-body">
+          {performance.error ? (
+            <p className="performance-state-message" role="alert">
+              {performance.error}
             </p>
-            {lyrics.isLoading ? <p>Loading lyrics...</p> : null}
-            {lyrics.error ? <p className="lyric-error">{lyrics.error}</p> : null}
-            {lyrics.document && lyricState ? (
-              <div
-                className="lyric-line-stack"
-                aria-label="Synchronized lyrics"
-                data-effective-time-ms={currentTimeMs.toFixed(0)}
-                data-lyric-offset-ms={lyricOffsetMs}
-                data-playback-time-ms={playbackTimeMs.toFixed(0)}
-                data-progress={
-                  currentRow
-                    ? presentationLineProgress(currentRow.line, currentTimeMs).toFixed(3)
-                    : "0.000"
-                }
-                data-timeline-state={lyricState.timelineState}
-              >
-                {lyricState.timelineState === "instrumental-gap" ? (
-                  <p
-                    className="lyric-line lyric-line-row lyric-line-current"
-                    data-presentation-lifecycle="active"
-                    data-presentation-role="current"
-                  >
-                    <span aria-label="Instrumental section">Instrumental</span>
-                  </p>
-                ) : null}
-                {presentationRows.map((row) => (
-                  <PresentationLyricRow currentTimeMs={currentTimeMs} key={row.line.id} row={row} />
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <p>Future live lyrics and performance presentation area.</p>
-        )}
+          ) : countdownNumber !== null ? (
+            <p
+              aria-atomic="true"
+              aria-label={`Performance starts in ${countdownNumber} ${countdownNumber === 1 ? "second" : "seconds"}`}
+              aria-live="polite"
+              className="performance-countdown"
+              key={countdownNumber}
+              role="timer"
+            >
+              {countdownNumber}
+            </p>
+          ) : showLyrics ? (
+            <div className="lyric-display" aria-live="polite">
+              {lyrics.isLoading ? (
+                <p className="performance-state-message">Loading lyrics...</p>
+              ) : null}
+              {lyrics.error || (!lyrics.isLoading && !lyrics.document) ? (
+                <p className="performance-state-message">Lyrics are not available for this song.</p>
+              ) : null}
+              {lyrics.document && lyricState ? (
+                <div
+                  className="lyric-line-stack"
+                  aria-label="Synchronized lyrics"
+                  data-effective-time-ms={currentTimeMs.toFixed(0)}
+                  data-lyric-offset-ms={lyricOffsetMs}
+                  data-playback-time-ms={playbackTimeMs.toFixed(0)}
+                  data-progress={
+                    currentRow
+                      ? presentationLineProgress(currentRow.line, currentTimeMs).toFixed(3)
+                      : "0.000"
+                  }
+                  data-timeline-state={lyricState.timelineState}
+                >
+                  {lyricState.timelineState === "instrumental-gap" ? (
+                    <p
+                      className="lyric-line lyric-line-row lyric-line-current"
+                      data-presentation-lifecycle="active"
+                      data-presentation-role="current"
+                    >
+                      <span aria-label="Instrumental section">Instrumental</span>
+                    </p>
+                  ) : null}
+                  {presentationRows.map((row) => (
+                    <PresentationLyricRow
+                      currentTimeMs={currentTimeMs}
+                      key={row.line.id}
+                      row={row}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="performance-state-message">
+              {performanceStateMessage(activePerformance)}
+            </p>
+          )}
+        </div>
+        <div
+          aria-hidden="true"
+          className="performance-waveform-reserve"
+          data-visualizer-active="false"
+          data-waveform-reserved="true"
+        />
       </section>
     </section>
   );
 }
 
-function performanceStatus(active: PerformanceDetailsProjection) {
-  if (active.state === "countdown") {
-    if (active.playback.startupPending) return "Starting playback";
-    return `Starting in ${Math.max(0, Math.ceil((active.countdownRemainingMs ?? 0) / 1_000))}`;
+function performanceCountdownNumber(
+  state: string | undefined,
+  countdownRemainingMs: number | null | undefined,
+) {
+  if (
+    state !== "countdown" ||
+    countdownRemainingMs === null ||
+    countdownRemainingMs === undefined
+  ) {
+    return null;
   }
-  if (active.state === "results") {
-    return "Results";
-  }
+  if (!Number.isFinite(countdownRemainingMs) || countdownRemainingMs <= 0) return null;
+  return Math.min(3, Math.max(1, Math.ceil(countdownRemainingMs / 1_000)));
+}
+
+function performanceStateMessage(active: PerformanceController["projection"]["active"]) {
+  if (!active) return "Waiting for the next singer.";
   if (active.failure) return active.failure.message;
-  return active.state.charAt(0).toUpperCase() + active.state.slice(1);
+
+  switch (active.state) {
+    case "created":
+    case "preparing":
+    case "ready":
+      return `Get ready, ${active.performer.displayName}.`;
+    case "countdown":
+      return "Starting shortly.";
+    case "playing":
+      return "The song is starting.";
+    case "finalizing":
+    case "results":
+      return "Finishing the performance.";
+    case "completed":
+      return "Performance complete.";
+    case "stopped":
+      return "Performance ended.";
+    case "failed":
+      return "This performance could not continue.";
+  }
 }
 
 function PresentationLyricRow({

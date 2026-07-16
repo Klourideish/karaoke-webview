@@ -44,7 +44,26 @@ Mutation commands use caller request IDs with a bounded 128-entry coordinator-lo
 
 ## Audio And Lyrics
 
-The HTML audio element remains mounted across workspace changes and remains the actual playback clock. Lyrics load by the same authoritative song ID and continue to read time from that element. Existing seek and session-local lyric-offset behavior are unchanged; seek is currently an adapter-local transport operation and is not a new Host lifecycle decision in P6-003P.
+The HTML audio element remains mounted across workspace changes and remains the actual playback clock. Lyrics load by the same authoritative song ID and continue to read time from that element. Seek remains an adapter-local transport operation and is not a new Host lifecycle decision.
+
+The Performance footer is currently intentionally inert. The Host-resolved media URL uses Tauri's `asset://localhost` protocol, which is safe for direct HTML media playback but is not exposed as a CORS-readable Web Audio source. Connecting that element to a `MediaElementAudioSourceNode` causes the browser to substitute zero-valued output and can silence the routed audio. The playback element therefore remains directly connected to the webview media pipeline, with no analyser, secondary decoder, or presentation animation attached.
+
+## Live Visualizer Feasibility
+
+No existing repository seam can safely provide a genuinely live visualizer from the current Tauri asset source.
+
+- A narrowly scoped read-only Tauri media protocol could emit the exact origin and CORS headers required by Web Audio. This could preserve genuinely live analysis and broad browser codec support, but it changes the trusted media-delivery boundary and requires Windows/Tauri security and audible-playback validation before adoption.
+- Host-side extraction could project a compact bounded envelope without touching the playback element. It offers strong playback isolation but requires a Host decoder and format policy, adds bounded CPU work, and produces a derived approximation rather than a live signal response.
+- No same-origin analysis source is currently available in the repository. The direct Tauri asset playback path must remain unchanged until one of the preceding boundaries receives explicit architectural approval.
+
+The Host persists an optional lyric timing offset by stable song ID in app-local data. React retains only a temporary adjustment for the current song. Presentation composes the two values once:
+
+```text
+totalOffset = savedSongOffset + temporarySessionOffset
+effectiveLyricTime = playbackTime - totalOffset
+```
+
+Positive values delay lyrics and negative values advance them. Saving is explicit, stores the current effective offset within `-3000 ms` to `+3000 ms`, and then clears the temporary adjustment. A song change also clears the temporary adjustment before loading the next Host projection. Persisted entries whose songs are absent remain inert and are never applied to another identity.
 
 ## Autoplay Constraint
 
